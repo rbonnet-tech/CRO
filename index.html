@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>AB Test Revenue Calculator</title>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="app">
+  <header>
+    <div>
+      <p class="eyebrow">E-COMMERCE • A/B TEST</p>
+      <h1>AB Test Revenue Calculator</h1>
+      <p class="subtitle">
+        Estime l'impact annuel d'un A/B test en tenant compte de la saisonnalité réelle de ton CA.
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <!-- IMPORT CSV -->
+    <section class="card">
+      <div class="section-title">
+        <span class="step">1</span>
+        <div>
+          <h2>Importer le CA historique</h2>
+          <p>Le fichier doit contenir le CA journalier HT post-RB.</p>
+        </div>
+      </div>
+
+      <div class="financial-reference">
+        <strong>Référentiel financier</strong>
+        <p>
+          L'historique est calculé en CA HT post-RB.
+          Les équivalents TTC pré-RB utilisent une TVA de 20 %
+          et un taux de RB annuel moyen de 24,65 %.
+        </p>
+      </div>
+
+      <div class="upload-zone" id="dropZone">
+        <input type="file" id="csvFile" accept=".csv,text/csv" hidden>
+
+        <button class="primary-btn" id="uploadBtn">
+          Importer un CSV
+        </button>
+
+        <p>ou glisse ton fichier ici</p>
+
+        <small>
+          Exemple : date,ca_ht_post_rb → 2025-01-01,24500
+        </small>
+      </div>
+
+      <div id="fileStatus" class="status hidden"></div>
+
+      <details>
+        <summary>Voir le format CSV attendu</summary>
+
+        <pre>date,ca_ht_post_rb
+2025-01-01,22450
+2025-01-02,24120
+2025-01-03,23890
+2025-01-04,26780</pre>
+
+        <p class="small">
+          Les dates JJ/MM/AAAA sont également acceptées.
+          Les séparateurs "," et ";" fonctionnent.
+        </p>
+      </details>
+    </section>
+
+    <!-- TEST -->
+    <section class="card">
+      <div class="section-title">
+        <span class="step">2</span>
+        <div>
+          <h2>Résultat de l'A/B test</h2>
+          <p>Indique le type de métrique utilisée pour mesurer le gain.</p>
+        </div>
+      </div>
+
+      <div class="grid two">
+        <label>
+          Date de début du test
+          <input type="date" id="testStart">
+        </label>
+
+        <label>
+          Date de fin du test
+          <input type="date" id="testEnd">
+        </label>
+      </div>
+
+      <label>
+        Métrique
+        <select id="metricType">
+          <option value="conversion">Taux de conversion</option>
+          <option value="basket">Panier moyen</option>
+          <option value="both">Conversion + panier moyen</option>
+          <option value="direct">Uplift CA direct</option>
+        </select>
+      </label>
+
+      <div id="conversionFields">
+        <div class="grid two">
+          <label>
+            Conversion A (%)
+            <input type="number" id="convA" step="0.01" placeholder="2.50">
+          </label>
+
+          <label>
+            Conversion B (%)
+            <input type="number" id="convB" step="0.01" placeholder="2.70">
+          </label>
+        </div>
+      </div>
+
+      <div id="basketFields" class="hidden">
+        <div class="grid two">
+          <label>
+            Panier moyen A — TTC pré-RB (€)
+            <input type="number" id="basketA" step="0.01" placeholder="80">
+          </label>
+
+          <label>
+            Panier moyen B — TTC pré-RB (€)
+            <input type="number" id="basketB" step="0.01" placeholder="84">
+          </label>
+        </div>
+
+        <p class="helper-text">
+          Les paniers sont saisis en TTC pré-RB.
+          L'impact HT post-RB est recalculé automatiquement.
+        </p>
+      </div>
+
+<div id="directFields" class="hidden">
+  <div class="grid two">
+    <label>
+      CA version A — TTC pré-RB (€)
+      <input
+        type="number"
+        id="directCaA"
+        step="0.01"
+        placeholder="300000"
+      >
+    </label>
+
+    <label>
+      CA version B — TTC pré-RB (€)
+      <input
+        type="number"
+        id="directCaB"
+        step="0.01"
+        placeholder="315000"
+      >
+    </label>
+  </div>
+
+  <p class="helper-text">
+    Saisis le CA total observé sur la même période pour les versions A et B.
+    L'uplift relatif est calculé automatiquement.
+  </p>
+</div>
+    </section>
+
+    <!-- PROJECTION -->
+    <section class="card">
+      <div class="section-title">
+        <span class="step">3</span>
+        <div>
+          <h2>Hypothèses de projection</h2>
+          <p>Permet d'adapter l'estimation à la réalité du site.</p>
+        </div>
+      </div>
+
+      <div class="grid two">
+        <label>
+          Date de mise en production
+          <input type="date" id="rolloutDate">
+        </label>
+
+        <label>
+          Part du CA concernée (%)
+          <input
+            type="number"
+            id="affectedShare"
+            value="100"
+            min="0"
+            max="100"
+            step="1"
+          >
+        </label>
+
+        <label>
+          Croissance annuelle prévue du site (%)
+          <input
+            type="number"
+            id="annualGrowth"
+            value="0"
+            step="0.1"
+          >
+        </label>
+
+        <label>
+          Durée de projection
+          <select id="projectionMonths">
+            <option value="12" selected>12 mois</option>
+            <option value="6">6 mois</option>
+            <option value="18">18 mois</option>
+            <option value="24">24 mois</option>
+          </select>
+        </label>
+
+        <label>
+          TVA (%)
+          <input
+            type="number"
+            id="vatRate"
+            value="20"
+            step="0.01"
+          >
+        </label>
+
+        <label>
+          RB annuel moyen (%)
+          <input
+            type="number"
+            id="rbRate"
+            value="24.65"
+            step="0.01"
+          >
+        </label>
+      </div>
+
+      <div class="scenario-box">
+        <h3>Scénarios</h3>
+
+        <div class="grid three">
+          <label>
+            Prudent
+            <div class="input-suffix">
+              <input type="number" id="lowFactor" value="50" step="5">
+              <span>% uplift</span>
+            </div>
+          </label>
+
+          <label>
+            Central
+            <div class="input-suffix">
+              <input type="number" id="centralFactor" value="100" step="5">
+              <span>% uplift</span>
+            </div>
+          </label>
+
+          <label>
+            Haut
+            <div class="input-suffix">
+              <input type="number" id="highFactor" value="120" step="5">
+              <span>% uplift</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <button class="calculate-btn" id="calculateBtn">
+        Calculer l'impact
+      </button>
+
+      <div id="errorMessage" class="error hidden"></div>
+    </section>
+
+    <!-- RESULTATS -->
+    <section id="results" class="results hidden">
+
+      <div class="result-hero">
+
+        <div>
+          <p class="eyebrow">
+            IMPACT ESTIMÉ
+          </p>
+
+          <div class="hero-values">
+
+            <div>
+              <span>Gain TTC pré-RB</span>
+              <h2 id="annualGainTTC">+0 €</h2>
+            </div>
+
+            <div class="hero-secondary">
+              <span>Gain HT post-RB</span>
+              <h3 id="annualGainHT">+0 €</h3>
+            </div>
+
+          </div>
+
+          <p id="periodLabel">
+            sur les 12 prochains mois
+          </p>
+        </div>
+
+        <div class="uplift-badge">
+          <span>Uplift mesuré</span>
+          <strong id="upliftValue">+0 %</strong>
+        </div>
+
+      </div>
+
+      <div class="reference-banner">
+        <span>
+          Historique : <strong>HT post-RB</strong>
+        </span>
+
+        <span>
+          TVA : <strong id="displayVAT">20 %</strong>
+        </span>
+
+        <span>
+          RB moyen :
+          <strong id="displayRB">24,65 %</strong>
+        </span>
+      </div>
+
+      <div class="kpi-grid">
+
+        <article class="kpi">
+          <span>CA de référence TTC pré-RB</span>
+          <strong id="baselineRevenueTTC">0 €</strong>
+          <small>projection saisonnalisée</small>
+        </article>
+
+        <article class="kpi">
+          <span>CA de référence HT post-RB</span>
+          <strong id="baselineRevenueHT">0 €</strong>
+          <small>issu de l'historique</small>
+        </article>
+
+        <article class="kpi featured">
+          <span>Gain TTC pré-RB</span>
+          <strong id="centralGainTTC">0 €</strong>
+          <small>scénario central</small>
+        </article>
+
+        <article class="kpi featured">
+          <span>Gain HT post-RB</span>
+          <strong id="centralGainHT">0 €</strong>
+          <small>scénario central</small>
+        </article>
+
+      </div>
+
+      <section class="card result-card">
+        <h2>Impact mois par mois</h2>
+
+        <p>
+          La projection respecte la saisonnalité
+          observée dans le CA HT post-RB historique.
+        </p>
+
+        <div class="chart-wrap">
+          <canvas id="revenueChart"></canvas>
+        </div>
+      </section>
+
+      <section class="card result-card">
+
+        <div class="table-header">
+          <div>
+            <h2>Détail de la projection</h2>
+            <p>
+              Restitution simultanée en HT post-RB et TTC pré-RB.
+            </p>
+          </div>
+
+          <button id="exportBtn" class="secondary-btn">
+            Exporter les résultats CSV
+          </button>
+        </div>
+
+        <div class="table-wrapper">
+
+          <table>
+
+            <thead>
+              <tr>
+                <th>Mois</th>
+                <th>CA HT post-RB</th>
+                <th>CA TTC pré-RB</th>
+                <th>Gain TTC pré-RB</th>
+                <th>Gain HT post-RB</th>
+              </tr>
+            </thead>
+
+            <tbody id="resultTable"></tbody>
+
+          </table>
+
+        </div>
+
+      </section>
+
+      <section class="methodology">
+
+        <h3>Méthode d'estimation</h3>
+
+        <p id="methodologyText"></p>
+
+      </section>
+
+    </section>
+
+  </main>
+</div>
+ <script src="script.js"></script>
+</body>
+</html>
