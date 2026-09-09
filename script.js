@@ -3,13 +3,54 @@ let lastProjection = [];
 
 const $ = (id) => document.getElementById(id);
 
+// ==============================
+// INDEXEDDB CONFIG
+// ==============================
+
+const DB_NAME = "abTestRevenueCalculator";
+const DB_VERSION = 1;
+const STORE_NAME = "historicalSales";
+const META_STORE = "metadata";
+
+let db = null;
+
+// ==============================
+// DOM
+// ==============================
+
 const csvFile = $("csvFile");
 const uploadBtn = $("uploadBtn");
 const dropZone = $("dropZone");
 const fileStatus = $("fileStatus");
 const metricType = $("metricType");
+const storedDataInfo = $("storedDataInfo");
+const storedDataText = $("storedDataText");
+const replaceCsvBtn = $("replaceCsvBtn");
 
-uploadBtn.addEventListener("click", () => csvFile.click());
+// ==============================
+// INIT
+// ==============================
+
+document.addEventListener("DOMContentLoaded", async () => {
+  await initIndexedDB();
+  await loadStoredHistoricalData();
+
+  updateMetricFields();
+});
+
+// ==============================
+// EVENTS
+// ==============================
+
+uploadBtn.addEventListener("click", () => {
+  csvFile.click();
+});
+
+if (replaceCsvBtn) {
+  replaceCsvBtn.addEventListener("click", () => {
+    csvFile.click();
+  });
+}
 
 csvFile.addEventListener("change", (event) => {
   if (event.target.files.length) {
@@ -43,6 +84,7 @@ $("testEnd").addEventListener("change", () => {
   if (!$("rolloutDate").value && $("testEnd").value) {
     const d = new Date($("testEnd").value + "T12:00:00");
     d.setDate(d.getDate() + 1);
+
     $("rolloutDate").value = toInputDate(d);
   }
 });
@@ -56,7 +98,210 @@ window.addEventListener("resize", () => {
   }
 });
 
-updateMetricFields();
+// ==============================
+// INDEXEDDB
+// ==============================
+
+function initIndexedDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(
+      DB_NAME,
+      DB_VERSION
+    );
+
+    request.onerror = () => {
+      reject(
+        new Error(
+          "Impossible d'ouvrir la base locale."
+        )
+      );
+    };
+
+    request.onsuccess = () => {
+      db = request.result;
+      resolve();
+    };
+
+    request.onupgradeneeded = (event) => {
+      const database = event.target.result;
+
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        database.createObjectStore(
+          STORE_NAME,
+          {
+            keyPath: "id",
+            autoIncrement: true
+          }
+        );
+      }
+
+      if (!database.objectStoreNames.contains(META_STORE)) {
+        database.createObjectStore(
+          META_STORE,
+          {
+            keyPath: "key"
+          }
+        );
+      }
+    };
+  });
+}
+
+function saveHistoricalDataToDB(data, fileName) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(
+      [STORE_NAME, META_STORE],
+      "readwrite"
+    );
+
+    const salesStore =
+      transaction.objectStore(STORE_NAME);
+
+    const metaStore =
+      transaction.objectStore(META_STORE);
+
+    salesStore.clear();
+
+    data.forEach((row) => {
+      salesStore.add({
+        date: row.date.toISOString(),
+        revenue: row.revenue
+      });
+    });
+
+    const firstDate =
+      data[0].date;
+
+    const lastDate =
+      data[data.length - 1].date;
+
+    metaStore.put({
+      key: "salesMetadata",
+      fileName,
+      importedAt: new Date().toISOString(),
+      firstDate: firstDate.toISOString(),
+      lastDate: lastDate.toISOString(),
+      rowCount: data.length
+    });
+
+    transaction.oncomplete = () => {
+      resolve();
+    };
+
+    transaction.onerror = () => {
+      reject(
+        new Error(
+          "Erreur lors de la sauvegarde locale."
+        )
+      );
+    };
+  });
+}
+
+function loadStoredHistoricalData() {
+  return new Promise((resolve) => {
+    if (!db) {
+      resolve();
+      return;
+    }
+
+    const transaction = db.transaction(
+      [STORE_NAME, META_STORE],
+      "readonly"
+    );
+
+    const salesStore =
+      transaction.objectStore(STORE_NAME);
+
+    const metaStore =
+      transaction.objectStore(META_STORE);
+
+    const salesRequest =
+      salesStore.getAll();
+
+    const metaRequest =
+      metaStore.get("salesMetadata");
+
+    transaction.oncomplete = () => {
+      const rows =
+        salesRequest.result || [];
+
+      const metadata =
+        metaRequest.result;
+
+      if (!rows.length || !metadata) {
+        resolve();
+        return;
+      }
+
+      historicalData = rows
+        .map((row) => ({
+          date: new Date(row.date),
+          revenue: row.revenue
+        }))
+        .sort(
+          (a, b) =>
+            a.date - b.date
+        );
+
+      showStoredDataInfo(metadata);
+
+      const totalHT =
+        historicalData.reduce(
+          (sum, row) =>
+            sum + row.revenue,
+          0
+        );
+
+      const totalTTC =
+        htPostRbToTtcPreRb(totalHT);
+
+      fileStatus.innerHTML = `
+        ✓ Base locale chargée automatiquement<br>
+        ${historicalData.length.toLocaleString("fr-FR")} lignes disponibles ·
+        ${formatMoney(totalHT)} HT post-RB ·
+        équivalent ${formatMoney(totalTTC)} TTC pré-RB
+      `;
+
+      fileStatus.classList.remove("hidden");
+
+      resolve();
+    };
+
+    transaction.onerror = () => {
+      resolve();
+    };
+  });
+}
+
+function showStoredDataInfo(metadata) {
+  if (!storedDataInfo || !storedDataText) {
+    return;
+  }
+
+  const firstDate =
+    new Date(metadata.firstDate);
+
+  const lastDate =
+    new Date(metadata.lastDate);
+
+  const importedAt =
+    new Date(metadata.importedAt);
+
+  storedDataText.innerHTML = `
+    Dernier import sur base du CA des ventes
+    du <strong>${formatDate(firstDate)}</strong>
+    au <strong>${formatDate(lastDate)}</strong>.
+    Dernière mise à jour :
+    <strong>${formatDateTime(importedAt)}</strong>.
+  `;
+
+  storedDataInfo.classList.remove("hidden");
+}
+
+// ==============================
+// METRIC FIELDS
+// ==============================
 
 function updateMetricFields() {
   const type = metricType.value;
@@ -77,17 +322,26 @@ function updateMetricFields() {
   );
 }
 
+// ==============================
+// CSV
+// ==============================
+
 function loadCSV(file) {
   if (!file.name.toLowerCase().endsWith(".csv")) {
-    showError("Le fichier doit être au format CSV.");
+    showError(
+      "Le fichier doit être au format CSV."
+    );
     return;
   }
 
   const reader = new FileReader();
 
-  reader.onload = (e) => {
+  reader.onload = async (e) => {
     try {
-      const parsed = parseCSV(e.target.result);
+      const parsed =
+        parseCSV(
+          e.target.result
+        );
 
       if (!parsed.length) {
         throw new Error(
@@ -95,18 +349,34 @@ function loadCSV(file) {
         );
       }
 
-      historicalData = parsed.sort((a, b) => a.date - b.date);
+      historicalData =
+        parsed.sort(
+          (a, b) =>
+            a.date - b.date
+        );
 
-      const totalHT = historicalData.reduce(
-        (sum, row) => sum + row.revenue,
-        0
+      await saveHistoricalDataToDB(
+        historicalData,
+        file.name
       );
 
-      const totalTTC = htPostRbToTtcPreRb(totalHT);
+      const totalHT =
+        historicalData.reduce(
+          (sum, row) =>
+            sum + row.revenue,
+          0
+        );
 
-      const firstDate = historicalData[0].date;
+      const totalTTC =
+        htPostRbToTtcPreRb(totalHT);
+
+      const firstDate =
+        historicalData[0].date;
+
       const lastDate =
-        historicalData[historicalData.length - 1].date;
+        historicalData[
+          historicalData.length - 1
+        ].date;
 
       fileStatus.innerHTML = `
         ✓ <strong>${file.name}</strong><br>
@@ -118,15 +388,36 @@ function loadCSV(file) {
 
       fileStatus.classList.remove("hidden");
 
+      showStoredDataInfo({
+        firstDate:
+          firstDate.toISOString(),
+        lastDate:
+          lastDate.toISOString(),
+        importedAt:
+          new Date().toISOString(),
+        fileName:
+          file.name,
+        rowCount:
+          historicalData.length
+      });
+
       hideError();
     } catch (error) {
       historicalData = [];
-      fileStatus.classList.add("hidden");
-      showError(error.message);
+      fileStatus.classList.add(
+        "hidden"
+      );
+
+      showError(
+        error.message
+      );
     }
   };
 
-  reader.readAsText(file, "UTF-8");
+  reader.readAsText(
+    file,
+    "UTF-8"
+  );
 }
 
 function parseCSV(text) {
@@ -135,9 +426,13 @@ function parseCSV(text) {
     .replace(/\r/g, "")
     .trim();
 
-  const lines = text
-    .split("\n")
-    .filter((line) => line.trim());
+  const lines =
+    text
+      .split("\n")
+      .filter(
+        (line) =>
+          line.trim()
+      );
 
   if (lines.length < 2) {
     throw new Error(
@@ -146,37 +441,50 @@ function parseCSV(text) {
   }
 
   const delimiter =
-    lines[0].split(";").length > lines[0].split(",").length
+    lines[0].split(";").length >
+    lines[0].split(",").length
       ? ";"
       : ",";
 
-  const headers = splitCSVLine(lines[0], delimiter)
-    .map(normalizeHeader);
+  const headers =
+    splitCSVLine(
+      lines[0],
+      delimiter
+    ).map(
+      normalizeHeader
+    );
 
-  const dateIndex = headers.findIndex((h) =>
-    [
-      "date",
-      "jour",
-      "day"
-    ].includes(h)
-  );
+  const dateIndex =
+    headers.findIndex(
+      (h) =>
+        [
+          "date",
+          "jour",
+          "day"
+        ].includes(h)
+    );
 
-  const revenueIndex = headers.findIndex((h) =>
-    [
-      "ca",
-      "cahtpostrb",
-      "htpostrb",
-      "caht",
-      "revenue",
-      "revenu",
-      "chiffredaffaires",
-      "chiffreaffaires",
-      "sales",
-      "turnover"
-    ].includes(h)
-  );
+  const revenueIndex =
+    headers.findIndex(
+      (h) =>
+        [
+          "ca",
+          "cahtpostrb",
+          "htpostrb",
+          "caht",
+          "revenue",
+          "revenu",
+          "chiffredaffaires",
+          "chiffreaffaires",
+          "sales",
+          "turnover"
+        ].includes(h)
+    );
 
-  if (dateIndex === -1 || revenueIndex === -1) {
+  if (
+    dateIndex === -1 ||
+    revenueIndex === -1
+  ) {
     throw new Error(
       'Le CSV doit contenir une colonne "date" et une colonne "ca_ht_post_rb" ou "ca".'
     );
@@ -184,11 +492,26 @@ function parseCSV(text) {
 
   const data = [];
 
-  for (let i = 1; i < lines.length; i++) {
-    const cells = splitCSVLine(lines[i], delimiter);
+  for (
+    let i = 1;
+    i < lines.length;
+    i++
+  ) {
+    const cells =
+      splitCSVLine(
+        lines[i],
+        delimiter
+      );
 
-    const date = parseDate(cells[dateIndex]);
-    const revenue = parseNumber(cells[revenueIndex]);
+    const date =
+      parseDate(
+        cells[dateIndex]
+      );
+
+    const revenue =
+      parseNumber(
+        cells[revenueIndex]
+      );
 
     if (
       date &&
@@ -205,14 +528,22 @@ function parseCSV(text) {
   return data;
 }
 
-function splitCSVLine(line, delimiter) {
+function splitCSVLine(
+  line,
+  delimiter
+) {
   const result = [];
 
   let current = "";
   let insideQuotes = false;
 
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
+  for (
+    let i = 0;
+    i < line.length;
+    i++
+  ) {
+    const char =
+      line[i];
 
     if (char === '"') {
       if (
@@ -222,44 +553,69 @@ function splitCSVLine(line, delimiter) {
         current += '"';
         i++;
       } else {
-        insideQuotes = !insideQuotes;
+        insideQuotes =
+          !insideQuotes;
       }
     } else if (
       char === delimiter &&
       !insideQuotes
     ) {
-      result.push(current.trim());
+      result.push(
+        current.trim()
+      );
+
       current = "";
     } else {
       current += char;
     }
   }
 
-  result.push(current.trim());
+  result.push(
+    current.trim()
+  );
 
   return result;
 }
 
-function normalizeHeader(value) {
-  return String(value || "")
+function normalizeHeader(
+  value
+) {
+  return String(
+    value || ""
+  )
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/['’\s_-]/g, "");
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    )
+    .replace(
+      /['’\s_-]/g,
+      ""
+    );
 }
+
+// ==============================
+// DATE / NUMBER PARSING
+// ==============================
 
 function parseDate(value) {
   if (!value) {
     return null;
   }
 
-  value = String(value)
-    .trim()
-    .replace(/"/g, "");
+  value =
+    String(value)
+      .trim()
+      .replace(
+        /"/g,
+        ""
+      );
 
-  let match = value.match(
-    /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/
-  );
+  let match =
+    value.match(
+      /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/
+    );
 
   if (match) {
     return createSafeDate(
@@ -269,9 +625,10 @@ function parseDate(value) {
     );
   }
 
-  match = value.match(
-    /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/
-  );
+  match =
+    value.match(
+      /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/
+    );
 
   if (match) {
     return createSafeDate(
@@ -281,7 +638,8 @@ function parseDate(value) {
     );
   }
 
-  const fallback = new Date(value);
+  const fallback =
+    new Date(value);
 
   if (!isNaN(fallback)) {
     return new Date(
@@ -295,13 +653,18 @@ function parseDate(value) {
   return null;
 }
 
-function createSafeDate(year, month, day) {
-  const d = new Date(
-    year,
-    month,
-    day,
-    12
-  );
+function createSafeDate(
+  year,
+  month,
+  day
+) {
+  const d =
+    new Date(
+      year,
+      month,
+      day,
+      12
+    );
 
   if (
     d.getFullYear() !== year ||
@@ -314,7 +677,9 @@ function createSafeDate(year, month, day) {
   return d;
 }
 
-function parseNumber(value) {
+function parseNumber(
+  value
+) {
   if (
     value === undefined ||
     value === null
@@ -322,17 +687,22 @@ function parseNumber(value) {
     return NaN;
   }
 
-  let v = String(value)
-    .replace(/"/g, "")
-    .replace(/\u00A0/g, "")
-    .replace(/\s/g, "")
-    .replace(/€/g, "");
+  let v =
+    String(value)
+      .replace(/"/g, "")
+      .replace(/\u00A0/g, "")
+      .replace(/\s/g, "")
+      .replace(/€/g, "");
 
   if (
     v.includes(",") &&
     !v.includes(".")
   ) {
-    v = v.replace(",", ".");
+    v =
+      v.replace(
+        ",",
+        "."
+      );
   } else if (
     v.includes(",") &&
     v.includes(".")
@@ -341,32 +711,55 @@ function parseNumber(value) {
       v.lastIndexOf(",") >
       v.lastIndexOf(".")
     ) {
-      v = v
-        .replace(/\./g, "")
-        .replace(",", ".");
+      v =
+        v
+          .replace(/\./g, "")
+          .replace(
+            ",",
+            "."
+          );
     } else {
-      v = v.replace(/,/g, "");
+      v =
+        v.replace(
+          /,/g,
+          ""
+        );
     }
   }
 
   return Number(v);
 }
 
+// ==============================
+// FINANCIAL REFERENCES
+// ==============================
+
 function getVatRate() {
-  return Number(
-    $("vatRate").value || 20
-  ) / 100;
+  return (
+    Number(
+      $("vatRate").value ||
+        20
+    ) / 100
+  );
 }
 
 function getRbRate() {
-  return Number(
-    $("rbRate").value || 24.65
-  ) / 100;
+  return (
+    Number(
+      $("rbRate").value ||
+        24.65
+    ) / 100
+  );
 }
 
-function ttcPreRbToHtPostRb(value) {
-  const vat = getVatRate();
-  const rb = getRbRate();
+function ttcPreRbToHtPostRb(
+  value
+) {
+  const vat =
+    getVatRate();
+
+  const rb =
+    getRbRate();
 
   return (
     value /
@@ -375,9 +768,14 @@ function ttcPreRbToHtPostRb(value) {
   );
 }
 
-function htPostRbToTtcPreRb(value) {
-  const vat = getVatRate();
-  const rb = getRbRate();
+function htPostRbToTtcPreRb(
+  value
+) {
+  const vat =
+    getVatRate();
+
+  const rb =
+    getRbRate();
 
   if (rb >= 1) {
     return 0;
@@ -390,6 +788,10 @@ function htPostRbToTtcPreRb(value) {
   );
 }
 
+// ==============================
+// PROJECTION
+// ==============================
+
 function calculateProjection() {
   hideError();
 
@@ -400,7 +802,8 @@ function calculateProjection() {
     return;
   }
 
-  const uplift = calculateUplift();
+  const uplift =
+    calculateUplift();
 
   if (uplift === null) {
     return;
@@ -416,8 +819,11 @@ function calculateProjection() {
     return;
   }
 
-  const vat = getVatRate();
-  const rb = getRbRate();
+  const vat =
+    getVatRate();
+
+  const rb =
+    getRbRate();
 
   if (
     !Number.isFinite(vat) ||
@@ -442,7 +848,8 @@ function calculateProjection() {
 
   const startDate =
     new Date(
-      rolloutValue + "T12:00:00"
+      rolloutValue +
+        "T12:00:00"
     );
 
   const months =
@@ -457,7 +864,8 @@ function calculateProjection() {
     );
 
   endDate.setDate(
-    endDate.getDate() - 1
+    endDate.getDate() -
+      1
   );
 
   const affectedShare =
@@ -471,22 +879,26 @@ function calculateProjection() {
 
   const annualGrowth =
     Number(
-      $("annualGrowth").value || 0
+      $("annualGrowth").value ||
+        0
     ) / 100;
 
   const lowFactor =
     Number(
-      $("lowFactor").value || 0
+      $("lowFactor").value ||
+        0
     ) / 100;
 
   const centralFactor =
     Number(
-      $("centralFactor").value || 0
+      $("centralFactor").value ||
+        0
     ) / 100;
 
   const highFactor =
     Number(
-      $("highFactor").value || 0
+      $("highFactor").value ||
+        0
     ) / 100;
 
   const seasonalProfile =
@@ -502,27 +914,34 @@ function calculateProjection() {
   let current =
     new Date(startDate);
 
-  while (current <= endDate) {
+  while (
+    current <= endDate
+  ) {
     const baselineHT =
       getExpectedRevenue(
         current,
         seasonalProfile
       );
 
-    if (baselineHT !== null) {
+    if (
+      baselineHT !== null
+    ) {
       const daysFromStart =
         (
           current -
           startDate
-        ) / 86400000;
+        ) /
+        86400000;
 
       const growthMultiplier =
         Math.pow(
           Math.max(
             0.01,
-            1 + annualGrowth
+            1 +
+              annualGrowth
           ),
-          daysFromStart / 365.25
+          daysFromStart /
+            365.25
         );
 
       const adjustedBaselineHT =
@@ -550,8 +969,12 @@ function calculateProjection() {
 
       const key =
         `${current.getFullYear()}-${String(
-          current.getMonth() + 1
-        ).padStart(2, "0")}`;
+          current.getMonth() +
+            1
+        ).padStart(
+          2,
+          "0"
+        )}`;
 
       if (!monthlyMap[key]) {
         monthlyMap[key] = {
@@ -594,7 +1017,8 @@ function calculateProjection() {
     }
 
     current.setDate(
-      current.getDate() + 1
+      current.getDate() +
+        1
     );
   }
 
@@ -603,7 +1027,8 @@ function calculateProjection() {
       monthlyMap
     ).sort(
       (a, b) =>
-        a.date - b.date
+        a.date -
+        b.date
     );
 
   renderResults({
@@ -621,11 +1046,17 @@ function calculateProjection() {
   });
 }
 
+// ==============================
+// UPLIFT
+// ==============================
+
 function calculateUplift() {
   const type =
     metricType.value;
 
-  if (type === "conversion") {
+  if (
+    type === "conversion"
+  ) {
     const a =
       Number(
         $("convA").value
@@ -643,13 +1074,19 @@ function calculateUplift() {
       showError(
         "Renseigne les taux de conversion A et B."
       );
+
       return null;
     }
 
-    return b / a - 1;
+    return (
+      b / a -
+      1
+    );
   }
 
-  if (type === "basket") {
+  if (
+    type === "basket"
+  ) {
     const a =
       Number(
         $("basketA").value
@@ -667,13 +1104,19 @@ function calculateUplift() {
       showError(
         "Renseigne les paniers moyens TTC pré-RB A et B."
       );
+
       return null;
     }
 
-    return b / a - 1;
+    return (
+      b / a -
+      1
+    );
   }
 
-  if (type === "both") {
+  if (
+    type === "both"
+  ) {
     const convA =
       Number(
         $("convA").value
@@ -697,74 +1140,71 @@ function calculateUplift() {
     if (
       !(convA > 0) ||
       !(basketA > 0) ||
-      !Number.isFinite(convB) ||
-      !Number.isFinite(basketB)
+      !Number.isFinite(
+        convB
+      ) ||
+      !Number.isFinite(
+        basketB
+      )
     ) {
       showError(
         "Renseigne conversion et panier moyen pour A et B."
       );
+
       return null;
     }
 
     const revenuePerVisitorA =
-      convA * basketA;
+      convA *
+      basketA;
 
     const revenuePerVisitorB =
-      convB * basketB;
+      convB *
+      basketB;
 
     return (
       revenuePerVisitorB /
-      revenuePerVisitorA -
+        revenuePerVisitorA -
       1
     );
   }
 
-if (type === "direct") {
-  const caA = Number($("directCaA").value);
-  const caB = Number($("directCaB").value);
+  if (
+    type === "direct"
+  ) {
+    const caA =
+      Number(
+        $("directCaA").value
+      );
 
-  if (!(caA > 0) || !Number.isFinite(caB)) {
-    showError(
-      "Renseigne le CA TTC pré-RB des versions A et B."
-    );
-    return null;
-  }
+    const caB =
+      Number(
+        $("directCaB").value
+      );
 
-  return caB / caA - 1;
+    if (
+      !(caA > 0) ||
+      !Number.isFinite(caB)
+    ) {
+      showError(
+        "Renseigne le CA TTC pré-RB des versions A et B."
+      );
 
-  const seasonalProfile = buildSeasonalityProfile();
-
-  let testRevenueHT = 0;
-  let current = new Date(testStart);
-
-  while (current <= testEnd) {
-    const expectedHT = getExpectedRevenue(
-      current,
-      seasonalProfile
-    );
-
-    if (expectedHT !== null) {
-      testRevenueHT += expectedHT;
+      return null;
     }
 
-    current.setDate(current.getDate() + 1);
-  }
-
-  if (testRevenueHT <= 0) {
-    showError(
-      "Impossible d'estimer le CA de référence sur la période du test."
+    return (
+      caB / caA -
+      1
     );
-    return null;
   }
-
-  const testRevenueTTC =
-    htPostRbToTtcPreRb(testRevenueHT);
-
-  return directGainTTC / testRevenueTTC;
-}
 
   return null;
 }
+
+// ==============================
+// SEASONALITY
+// ==============================
 
 function buildSeasonalityProfile() {
   const byDay = {};
@@ -777,18 +1217,27 @@ function buildSeasonalityProfile() {
     (row) => {
       const month =
         String(
-          row.date.getMonth() + 1
-        ).padStart(2, "0");
+          row.date.getMonth() +
+            1
+        ).padStart(
+          2,
+          "0"
+        );
 
       const day =
         String(
           row.date.getDate()
-        ).padStart(2, "0");
+        ).padStart(
+          2,
+          "0"
+        );
 
       const dayKey =
         `${month}-${day}`;
 
-      if (!byDay[dayKey]) {
+      if (
+        !byDay[dayKey]
+      ) {
         byDay[dayKey] = [];
       }
 
@@ -799,11 +1248,19 @@ function buildSeasonalityProfile() {
       const monthKey =
         row.date.getMonth();
 
-      if (!byMonth[monthKey]) {
-        byMonth[monthKey] = [];
+      if (
+        !byMonth[
+          monthKey
+        ]
+      ) {
+        byMonth[
+          monthKey
+        ] = [];
       }
 
-      byMonth[monthKey].push(
+      byMonth[
+        monthKey
+      ].push(
         row.revenue
       );
 
@@ -814,7 +1271,8 @@ function buildSeasonalityProfile() {
     }
   );
 
-  const dailyAverage = {};
+  const dailyAverage =
+    {};
 
   Object.keys(
     byDay
@@ -827,7 +1285,8 @@ function buildSeasonalityProfile() {
     }
   );
 
-  const monthlyAverage = {};
+  const monthlyAverage =
+    {};
 
   Object.keys(
     byMonth
@@ -857,13 +1316,20 @@ function getExpectedRevenue(
 ) {
   const month =
     String(
-      date.getMonth() + 1
-    ).padStart(2, "0");
+      date.getMonth() +
+        1
+    ).padStart(
+      2,
+      "0"
+    );
 
   const day =
     String(
       date.getDate()
-    ).padStart(2, "0");
+    ).padStart(
+      2,
+      "0"
+    );
 
   const dayKey =
     `${month}-${day}`;
@@ -918,6 +1384,10 @@ function getExpectedRevenue(
   );
 }
 
+// ==============================
+// RESULTS
+// ==============================
+
 function renderResults(data) {
   $("results").classList.remove(
     "hidden"
@@ -937,6 +1407,16 @@ function renderResults(data) {
   const gainTTC =
     htPostRbToTtcPreRb(
       gainHT
+    );
+
+  const lowGainTTC =
+    htPostRbToTtcPreRb(
+      data.lowTotal
+    );
+
+  const highGainTTC =
+    htPostRbToTtcPreRb(
+      data.highTotal
     );
 
   $("annualGainTTC").textContent =
@@ -987,6 +1467,24 @@ function renderResults(data) {
       getRbRate()
     );
 
+  if (
+    $("prudentAnnualGain")
+  ) {
+    $("prudentAnnualGain").textContent =
+      signedMoney(
+        lowGainTTC
+      );
+  }
+
+  if (
+    $("highAnnualGain")
+  ) {
+    $("highAnnualGain").textContent =
+      signedMoney(
+        highGainTTC
+      );
+  }
+
   renderTable();
   renderChart();
 
@@ -999,14 +1497,21 @@ function renderResults(data) {
     est appliqué uniquement à
     <strong>${formatPercent(data.affectedShare)}</strong>
     du CA concerné.
-    Le résultat est ensuite restitué dans les deux référentiels :
-    <strong>HT post-RB</strong> et
-    <strong>TTC pré-RB</strong>.
-    La conversion utilise une TVA de
+    Le scénario central conserve
+    <strong>${formatPercent(data.centralFactor)}</strong>
+    de l'uplift observé.
+    Le scénario prudent retient
+    <strong>${formatPercent(data.lowFactor)}</strong>
+    et le scénario haut
+    <strong>${formatPercent(data.highFactor)}</strong>.
+    Les résultats sont restitués en
+    <strong>HT post-RB</strong>
+    et en
+    <strong>TTC pré-RB</strong>,
+    avec une TVA de
     <strong>${formatPercent(getVatRate())}</strong>
     et un RB annuel moyen de
     <strong>${formatPercent(getRbRate())}</strong>.
-    Il s'agit d'une estimation basée sur l'uplift observé et sur la saisonnalité historique.
   `;
 
   $("results").scrollIntoView({
@@ -1070,10 +1575,16 @@ function renderTable() {
         </td>
       `;
 
-      tbody.appendChild(tr);
+      tbody.appendChild(
+        tr
+      );
     }
   );
 }
+
+// ==============================
+// CHART
+// ==============================
 
 function renderChart() {
   const canvas =
@@ -1091,13 +1602,17 @@ function renderChart() {
     1;
 
   canvas.width =
-    rect.width * dpr;
+    rect.width *
+    dpr;
 
   canvas.height =
-    rect.height * dpr;
+    rect.height *
+    dpr;
 
   const ctx =
-    canvas.getContext("2d");
+    canvas.getContext(
+      "2d"
+    );
 
   ctx.setTransform(
     1,
@@ -1126,7 +1641,9 @@ function renderChart() {
     height
   );
 
-  if (!lastProjection.length) {
+  if (
+    !lastProjection.length
+  ) {
     return;
   }
 
@@ -1178,12 +1695,15 @@ function renderChart() {
 
   ctx.lineTo(
     padding.left,
-    padding.top + chartH
+    padding.top +
+      chartH
   );
 
   ctx.lineTo(
-    padding.left + chartW,
-    padding.top + chartH
+    padding.left +
+      chartW,
+    padding.top +
+      chartH
   );
 
   ctx.stroke();
@@ -1236,7 +1756,8 @@ function renderChart() {
       compactMoney(
         value
       ),
-      padding.left - 10,
+      padding.left -
+        10,
       y + 4
     );
   }
@@ -1251,7 +1772,8 @@ function renderChart() {
   const barWidth =
     Math.max(
       8,
-      barSpace * 0.55
+      barSpace *
+        0.55
     );
 
   lastProjection.forEach(
@@ -1268,7 +1790,8 @@ function renderChart() {
 
       const x =
         padding.left +
-        i * barSpace +
+        i *
+          barSpace +
         (
           barSpace -
           barWidth
@@ -1308,7 +1831,8 @@ function renderChart() {
       );
 
       ctx.rotate(
-        -Math.PI / 5
+        -Math.PI /
+          5
       );
 
       ctx.fillStyle =
@@ -1344,14 +1868,17 @@ function roundRect(
   const radius =
     Math.min(
       r,
-      Math.abs(w) / 2,
-      Math.abs(h) / 2
+      Math.abs(w) /
+        2,
+      Math.abs(h) /
+        2
     );
 
   ctx.beginPath();
 
   ctx.moveTo(
-    x + radius,
+    x +
+      radius,
     y
   );
 
@@ -1390,8 +1917,14 @@ function roundRect(
   ctx.closePath();
 }
 
+// ==============================
+// EXPORT
+// ==============================
+
 function exportResults() {
-  if (!lastProjection.length) {
+  if (
+    !lastProjection.length
+  ) {
     return;
   }
 
@@ -1428,10 +1961,18 @@ function exportResults() {
           formatMonth(
             row.date
           ),
-          baselineHT.toFixed(2),
-          baselineTTC.toFixed(2),
-          gainTTC.toFixed(2),
-          gainHT.toFixed(2)
+          baselineHT.toFixed(
+            2
+          ),
+          baselineTTC.toFixed(
+            2
+          ),
+          gainTTC.toFixed(
+            2
+          ),
+          gainHT.toFixed(
+            2
+          )
         ].join(";")
       );
     }
@@ -1441,7 +1982,9 @@ function exportResults() {
     new Blob(
       [
         "\uFEFF" +
-          lines.join("\n")
+          lines.join(
+            "\n"
+          )
       ],
       {
         type:
@@ -1459,7 +2002,8 @@ function exportResults() {
       "a"
     );
 
-  a.href = url;
+  a.href =
+    url;
 
   a.download =
     "projection-ab-test.csv";
@@ -1471,15 +2015,27 @@ function exportResults() {
   );
 }
 
-function average(values) {
-  if (!values.length) {
+// ==============================
+// HELPERS
+// ==============================
+
+function average(
+  values
+) {
+  if (
+    !values.length
+  ) {
     return 0;
   }
 
   return (
     values.reduce(
-      (sum, value) =>
-        sum + value,
+      (
+        sum,
+        value
+      ) =>
+        sum +
+        value,
       0
     ) /
     values.length
@@ -1496,7 +2052,9 @@ function addMonths(
   const originalDay =
     result.getDate();
 
-  result.setDate(1);
+  result.setDate(
+    1
+  );
 
   result.setMonth(
     result.getMonth() +
@@ -1506,7 +2064,8 @@ function addMonths(
   const lastDay =
     new Date(
       result.getFullYear(),
-      result.getMonth() + 1,
+      result.getMonth() +
+        1,
       0
     ).getDate();
 
@@ -1540,11 +2099,16 @@ function formatMoney(
   return new Intl.NumberFormat(
     "fr-FR",
     {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0
+      style:
+        "currency",
+      currency:
+        "EUR",
+      maximumFractionDigits:
+        0
     }
-  ).format(value);
+  ).format(
+    value
+  );
 }
 
 function signedMoney(
@@ -1557,7 +2121,9 @@ function signedMoney(
 
   return (
     sign +
-    formatMoney(value)
+    formatMoney(
+      value
+    )
   );
 }
 
@@ -1567,12 +2133,18 @@ function compactMoney(
   return new Intl.NumberFormat(
     "fr-FR",
     {
-      notation: "compact",
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 1
+      notation:
+        "compact",
+      style:
+        "currency",
+      currency:
+        "EUR",
+      maximumFractionDigits:
+        1
     }
-  ).format(value);
+  ).format(
+    value
+  );
 }
 
 function formatPercent(
@@ -1581,10 +2153,14 @@ function formatPercent(
   return new Intl.NumberFormat(
     "fr-FR",
     {
-      style: "percent",
-      maximumFractionDigits: 2
+      style:
+        "percent",
+      maximumFractionDigits:
+        2
     }
-  ).format(value);
+  ).format(
+    value
+  );
 }
 
 function signedPercent(
@@ -1597,7 +2173,9 @@ function signedPercent(
 
   return (
     sign +
-    formatPercent(value)
+    formatPercent(
+      value
+    )
   );
 }
 
@@ -1606,7 +2184,25 @@ function formatDate(
 ) {
   return new Intl.DateTimeFormat(
     "fr-FR"
-  ).format(date);
+  ).format(
+    date
+  );
+}
+
+function formatDateTime(
+  date
+) {
+  return new Intl.DateTimeFormat(
+    "fr-FR",
+    {
+      dateStyle:
+        "short",
+      timeStyle:
+        "short"
+    }
+  ).format(
+    date
+  );
 }
 
 function formatMonth(
@@ -1615,10 +2211,14 @@ function formatMonth(
   return new Intl.DateTimeFormat(
     "fr-FR",
     {
-      month: "long",
-      year: "numeric"
+      month:
+        "long",
+      year:
+        "numeric"
     }
-  ).format(date);
+  ).format(
+    date
+  );
 }
 
 function shortMonth(
@@ -1627,10 +2227,14 @@ function shortMonth(
   return new Intl.DateTimeFormat(
     "fr-FR",
     {
-      month: "short",
-      year: "2-digit"
+      month:
+        "short",
+      year:
+        "2-digit"
     }
-  ).format(date);
+  ).format(
+    date
+  );
 }
 
 function toInputDate(
@@ -1641,7 +2245,8 @@ function toInputDate(
 
   const m =
     String(
-      date.getMonth() + 1
+      date.getMonth() +
+        1
     ).padStart(
       2,
       "0"
