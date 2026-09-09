@@ -31,7 +31,14 @@
           <p>Le fichier doit contenir le CA journalier HT post-RB.</p>
         </div>
       </div>
-
+      
+<div id="storedDataInfo" class="stored-data-info hidden">
+  <strong>Base enregistrée</strong>
+  <p id="storedDataText"></p>
+  <button id="replaceCsvBtn" class="secondary-btn">
+    Importer un nouveau CSV pour mise à jour
+  </button>
+</div>
       <div class="financial-reference">
         <strong>Référentiel financier</strong>
         <p>
@@ -352,6 +359,21 @@
         </article>
 
       </div>
+      <div class="scenario-results">
+
+  <article class="scenario-result">
+    <span>Scénario prudent</span>
+    <strong id="prudentAnnualGain">+0 €</strong>
+    <small>CA annuel incrémental TTC pré-RB</small>
+  </article>
+
+  <article class="scenario-result">
+    <span>Scénario haut</span>
+    <strong id="highAnnualGain">+0 €</strong>
+    <small>CA annuel incrémental TTC pré-RB</small>
+  </article>
+
+</div>
 
       <section class="card result-card">
         <h2>Impact mois par mois</h2>
