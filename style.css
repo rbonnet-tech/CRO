@@ -458,6 +458,50 @@ th {
   margin-top: -7px;
   font-size: 12px;
 }
+.stored-data-info {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: #f5f6f8;
+  border: 1px solid var(--border);
+}
+
+.stored-data-info p {
+  margin: 6px 0 14px;
+  font-size: 13px;
+}
+
+.scenario-results {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.scenario-result {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: white;
+}
+
+.scenario-result span,
+.scenario-result small {
+  display: block;
+  color: var(--muted);
+}
+
+.scenario-result strong {
+  display: block;
+  margin: 8px 0 5px;
+  font-size: 26px;
+}
+
+@media (max-width: 700px) {
+  .scenario-results {
+    grid-template-columns: 1fr;
+  }
+}
 
 @media (max-width: 700px) {
   .hero-values {
