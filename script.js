@@ -8,7 +8,10 @@ const $ = (id) => document.getElementById(id);
 // ==============================
 
 const DB_NAME = "abTestRevenueCalculator";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const TEST_STORE = "savedTests";
+let lastResult = null;
+let lastInputs = null;
 const STORE_NAME = "historicalSales";
 const META_STORE = "metadata";
 
@@ -32,8 +35,13 @@ const replaceCsvBtn = $("replaceCsvBtn");
 // ==============================
 
 document.addEventListener("DOMContentLoaded", async () => {
-  await initIndexedDB();
-  await loadStoredHistoricalData();
+  try {
+    await initIndexedDB();
+    await loadStoredHistoricalData();
+    await renderSavedTests();
+  } catch (error) {
+    showError(error.message);
+  }
 
   updateMetricFields();
 });
@@ -91,6 +99,7 @@ $("testEnd").addEventListener("change", () => {
 
 $("calculateBtn").addEventListener("click", calculateProjection);
 $("exportBtn").addEventListener("click", exportResults);
+$("pdfBtn")?.addEventListener("click", generatePDF);
 
 window.addEventListener("resize", () => {
   if (lastProjection.length) {
@@ -119,11 +128,15 @@ function initIndexedDB() {
 
     request.onsuccess = () => {
       db = request.result;
+      db.onversionchange = () => { db.close(); db = null; };
       resolve();
     };
 
     request.onupgradeneeded = (event) => {
       const database = event.target.result;
+      if (!database.objectStoreNames.contains(TEST_STORE)) {
+        database.createObjectStore(TEST_STORE, { keyPath: "id" });
+      }
 
       if (!database.objectStoreNames.contains(STORE_NAME)) {
         database.createObjectStore(
@@ -349,6 +362,9 @@ function loadCSV(file) {
         );
       }
 
+      lastProjection = [];
+      lastResult = null;
+      $("results").classList.add("hidden");
       historicalData =
         parsed.sort(
           (a, b) =>
@@ -379,7 +395,7 @@ function loadCSV(file) {
         ].date;
 
       fileStatus.innerHTML = `
-        ✓ <strong>${file.name}</strong><br>
+        ✓ <strong>${escapeHTML(file.name)}</strong><br>
         ${historicalData.length.toLocaleString("fr-FR")} lignes importées ·
         ${formatMoney(totalHT)} HT post-RB ·
         équivalent ${formatMoney(totalTTC)} TTC pré-RB ·
@@ -727,7 +743,7 @@ function parseNumber(
     }
   }
 
-  return Number(v);
+  return v.trim() ? Number(v) : NaN;
 }
 
 // ==============================
@@ -794,6 +810,19 @@ function htPostRbToTtcPreRb(
 
 function calculateProjection() {
   hideError();
+  const numericFields = ["affectedShare", "annualGrowth", "lowFactor", "centralFactor", "highFactor"];
+  if (numericFields.some(id => !$(id).value.trim() || !Number.isFinite(Number($(id).value))) ||
+      Number($("annualGrowth").value) <= -100 ||
+      ![6, 12, 18, 24].includes(Number($("projectionMonths").value)) ||
+      !parseDate($("rolloutDate").value)) {
+    showError("Vérifie la date et les hypothèses de projection."); return;
+  }
+  if ($("testStart").value && $("testEnd").value && $("testStart").value > $("testEnd").value) {
+    showError("La fin du test doit suivre son début."); return;
+  }
+  const link = $("kameleoonUrl")?.value.trim();
+  if (link && !safeURL(link)) { showError("Le lien Kameleoon doit être une URL HTTP ou HTTPS valide."); return; }
+
 
   if (!historicalData.length) {
     showError(
@@ -1051,6 +1080,13 @@ function calculateProjection() {
 // ==============================
 
 function calculateUplift() {
+  const fields = { conversion: ["convA", "convB"], basket: ["basketA", "basketB"],
+    both: ["convA", "convB", "basketA", "basketB"], direct: ["directCaA", "directCaB"] }[metricType.value];
+  if (!fields || fields.some(id => !$(id).value.trim() || !Number.isFinite(Number($(id).value)) || Number($(id).value) < 0)) {
+    showError("Renseigne toutes les valeurs A et B avec des nombres positifs ou nuls.");
+    return null;
+  }
+
   const type =
     metricType.value;
 
@@ -1388,7 +1424,11 @@ function getExpectedRevenue(
 // RESULTS
 // ==============================
 
-function renderResults(data) {
+function renderResults(data, save = true) {
+  lastResult = { ...data };
+  lastInputs = captureInputs();
+  renderTestIdentity();
+  if (save) saveCurrentTest().catch(error => showError(error.message));
   $("results").classList.remove(
     "hidden"
   );
@@ -1922,6 +1962,7 @@ function roundRect(
 // ==============================
 
 function exportResults() {
+  if (!checkCurrentResult()) return;
   if (
     !lastProjection.length
   ) {
@@ -2278,4 +2319,136 @@ function hideError() {
   $("errorMessage").classList.add(
     "hidden"
   );
+}
+// Test history and PDF export. All data stays in this browser.
+const INPUT_IDS = ["testTitle", "kameleoonUrl", "testStart", "testEnd", "metricType",
+  "convA", "convB", "basketA", "basketB", "directCaA", "directCaB", "rolloutDate",
+  "affectedShare", "annualGrowth", "projectionMonths", "vatRate", "rbRate",
+  "lowFactor", "centralFactor", "highFactor"];
+
+function captureInputs() {
+  return Object.fromEntries(INPUT_IDS.map(id => [id, $(id)?.value ?? ""]));
+}
+function safeURL(value) {
+  try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) ? url.href : ""; }
+  catch { return ""; }
+}
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, char => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[char]));
+}
+function renderTestIdentity() {
+  if ($("resultTestTitle")) $("resultTestTitle").textContent = lastInputs.testTitle.trim() || "Expérience sans nom";
+  const link = $("resultKameleoonLink");
+  if (!link) return;
+  const url = safeURL(lastInputs.kameleoonUrl);
+  link.textContent = url ? "Voir les résultats Kameleoon" : "Lien non renseigné";
+  link.removeAttribute("href");
+  if (url) link.href = url;
+  link.rel = "noopener noreferrer";
+}
+function checkCurrentResult() {
+  if (!lastResult || !lastProjection.length) {
+    showError("Calcule d'abord les résultats."); return false;
+  }
+  if (JSON.stringify(captureInputs()) !== JSON.stringify(lastInputs)) {
+    showError("Le formulaire a changé : recalcule l'impact avant l'export."); return false;
+  }
+  return true;
+}
+function testTransaction(mode, operation) {
+  return new Promise((resolve, reject) => {
+    if (!db) { reject(new Error("Stockage local indisponible. Le test n'a pas été sauvegardé.")); return; }
+    const transaction = db.transaction(TEST_STORE, mode);
+    const request = operation(transaction.objectStore(TEST_STORE));
+    transaction.oncomplete = () => resolve(request.result);
+    transaction.onerror = transaction.onabort = () => reject(new Error("Impossible d'accéder à l'historique des tests."));
+  });
+}
+async function saveCurrentTest() {
+  if (!lastInputs?.testTitle.trim()) return;
+  const inputs = { ...lastInputs, testTitle: lastInputs.testTitle.trim() };
+  const id = JSON.stringify([inputs.testTitle, inputs.testStart, inputs.testEnd, inputs.metricType]);
+  const test = { id, inputs, result: { ...lastResult }, projection: lastProjection.map(row => ({ ...row })), updatedAt: new Date().toISOString() };
+  await testTransaction("readwrite", store => store.put(test));
+  await renderSavedTests();
+}
+async function renderSavedTests() {
+  const list = $("savedTestsList");
+  if (!list || !db) return;
+  const tests = await testTransaction("readonly", store => store.getAll());
+  list.replaceChildren();
+  if (!tests.length) { list.textContent = "Aucun test sauvegardé. Renseigne un nom puis calcule l'impact."; return; }
+  tests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  for (const test of tests) {
+    const card = document.createElement("div"); card.className = "saved-test-card";
+    const title = document.createElement("strong"); title.textContent = test.inputs.testTitle;
+    const details = document.createElement("p");
+    details.textContent = `${test.inputs.testStart || "—"} → ${test.inputs.testEnd || "—"} · ${signedPercent(test.result.uplift)} · Mis à jour le ${formatDateTime(new Date(test.updatedAt))}`;
+    const actions = document.createElement("div"); actions.className = "saved-test-actions";
+    const load = document.createElement("button"); load.type = "button"; load.className = "secondary-btn"; load.textContent = "Recharger";
+    load.addEventListener("click", () => {
+      for (const id of INPUT_IDS) if ($(id)) $(id).value = test.inputs[id] ?? "";
+      updateMetricFields();
+      lastProjection = test.projection.map(row => ({ ...row, date: new Date(row.date) }));
+      renderResults(test.result, false);
+      hideError();
+    });
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "secondary-btn"; remove.textContent = "Supprimer";
+    remove.addEventListener("click", async () => {
+      if (!window.confirm(`Supprimer le test « ${test.inputs.testTitle} » ?`)) return;
+      try { await testTransaction("readwrite", store => store.delete(test.id)); await renderSavedTests(); }
+      catch (error) { showError(error.message); }
+    });
+    actions.append(load, remove); card.append(title, details, actions); list.append(card);
+  }
+}
+function formatMoneyPDF(value) {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(value).replace(/[\u00a0\u202f]/g, " ") + " EUR";
+}
+function signedMoneyPDF(value) { return (value > 0 ? "+" : "") + formatMoneyPDF(value); }
+function generatePDF() {
+  if (!checkCurrentResult()) return;
+  if (!window.jspdf?.jsPDF) { showError("La bibliothèque jsPDF n'est pas chargée. Vérifie son inclusion dans le HTML."); return; }
+  try {
+    const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
+    let y = 20;
+    const text = (value, size = 11, bold = false) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setFontSize(size);
+      const lines = doc.splitTextToSize(String(value).replace(/[\u00a0\u202f]/g, " "), 170);
+      for (const line of lines) {
+        if (y > 275) { doc.addPage(); y = 20; }
+        doc.text(line, 20, y); y += size * 0.45 + 2;
+      }
+    };
+    const link = (label, url) => {
+      if (!url) return;
+      if (y > 275) { doc.addPage(); y = 20; }
+      doc.setFontSize(10); doc.setTextColor(40, 80, 180);
+      doc.textWithLink(label, 20, y, { url }); doc.setTextColor(0, 0, 0); y += 10;
+    };
+    text("A/B TEST - ESTIMATION", 11, true);
+    text(lastInputs.testTitle.trim() || "Expérience sans nom", 20, true);
+    const date = value => value ? formatDate(parseDate(value)) : "Non renseignée";
+    text(`Période du test : ${date(lastInputs.testStart)} au ${date(lastInputs.testEnd)}`, 10);
+    link("Voir les résultats Kameleoon", safeURL(lastInputs.kameleoonUrl));
+    text(`Uplift observé : ${signedPercent(lastResult.uplift)}`, 16, true);
+    text(`Projection sur ${lastResult.months} mois à partir du ${date(lastInputs.rolloutDate)}`, 12, true);
+    const equivalent = value => value / (1 - Number(lastInputs.rbRate || 24.65) / 100) * (1 + Number(lastInputs.vatRate || 20) / 100);
+    text(`CA de référence : ${formatMoneyPDF(lastResult.baselineTotal)} HT post-RB`, 10);
+    text(`Équivalent : ${formatMoneyPDF(equivalent(lastResult.baselineTotal))} TTC pré-RB`, 10);
+    y += 4;
+    for (const [label, key] of [["Prudent", "lowTotal"], ["Central", "centralTotal"], ["Haut", "highTotal"]]) {
+      text(`Scénario ${label} - gain estimé`, 12, true);
+      text(`${signedMoneyPDF(equivalent(lastResult[key]))} TTC pré-RB`, 14, true);
+      text(`${signedMoneyPDF(lastResult[key])} HT post-RB`, 11); y += 3;
+    }
+    text(`Part du CA concernée : ${lastInputs.affectedShare} % ; croissance annuelle : ${lastInputs.annualGrowth} %.`, 9);
+    text(`Uplift retenu : prudent ${lastInputs.lowFactor} %, central ${lastInputs.centralFactor} %, haut ${lastInputs.highFactor} %.`, 9);
+    text(`TVA : ${lastInputs.vatRate} % ; RB : ${lastInputs.rbRate} %.`, 9);
+    text("Estimation basée sur la saisonnalité historique et les hypothèses saisies. Les gains futurs ne sont pas garantis.", 9);
+    const simulator = new URL(window.location.href); simulator.search = ""; simulator.hash = "";
+    link("Ouvrir le simulateur", safeURL(simulator.href));
+    const name = (lastInputs.testTitle || "ab-test").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9_-]+/gi, "-").slice(0, 80);
+    doc.save(`projection-${name}.pdf`);
+  } catch (error) { showError(`Impossible de générer le PDF : ${error.message}`); }
 }
