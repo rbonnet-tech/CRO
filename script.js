@@ -1561,339 +1561,167 @@ function renderResults(data, save = true) {
 }
 
 function renderTable() {
-  const tbody =
-    $("resultTable");
-
+  const tbody = $("resultTable");
   tbody.innerHTML = "";
 
-  lastProjection.forEach(
-    (row) => {
-      const baselineHT =
-        row.baseline;
+  lastProjection.forEach(row => {
+    const baselineHT = row.baseline;
+    const gainHT = row.central;
+    const totalHT = baselineHT + gainHT;
 
-      const baselineTTC =
-        htPostRbToTtcPreRb(
-          baselineHT
-        );
+    const tr = document.createElement("tr");
 
-      const gainHT =
-        row.central;
+    tr.innerHTML = `
+      <td>${formatMonth(row.date)}</td>
+      <td>${formatMoney(baselineHT)}</td>
+      <td><strong>${signedMoney(gainHT)}</strong></td>
+      <td><strong>${formatMoney(totalHT)}</strong></td>
+    `;
 
-      const gainTTC =
-        htPostRbToTtcPreRb(
-          gainHT
-        );
-
-      const tr =
-        document.createElement(
-          "tr"
-        );
-
-      tr.innerHTML = `
-        <td>
-          ${formatMonth(row.date)}
-        </td>
-
-        <td>
-          ${formatMoney(baselineHT)}
-        </td>
-
-        <td>
-          ${formatMoney(baselineTTC)}
-        </td>
-
-        <td>
-          <strong>
-            ${signedMoney(gainTTC)}
-          </strong>
-        </td>
-
-        <td>
-          <strong>
-            ${signedMoney(gainHT)}
-          </strong>
-        </td>
-      `;
-
-      tbody.appendChild(
-        tr
-      );
-    }
-  );
+    tbody.appendChild(tr);
+  });
 }
 
 // ==============================
 // CHART
 // ==============================
 
-function renderChart() {
-  const canvas =
-    $("revenueChart");
+// Both series use the saved calculation, including when a test is reloaded.
+const CHART_COLORS = {
+  baseline: "#A7ABB5",
+  tested: "#191F40"
+};
 
-  if (!canvas) {
-    return;
-  }
+function comparisonRows() {
+  if (!lastResult || !lastInputs) return [];
 
-  const rect =
-    canvas.getBoundingClientRect();
+  return lastProjection.map(row => {
+    const baseline = row.baseline;
 
-  const dpr =
-    window.devicePixelRatio ||
-    1;
+    return {
+      date: row.date,
+      baseline,
+      tested:
+        baseline *
+        (1 + lastResult.uplift * lastResult.affectedShare)
+    };
+  });
+}
 
-  canvas.width =
-    rect.width *
-    dpr;
+function drawComparisonChart(canvas, width, height, scale = 1) {
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
 
-  canvas.height =
-    rect.height *
-    dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
 
-  const ctx =
-    canvas.getContext(
-      "2d"
-    );
+  const rows = comparisonRows();
+  if (!rows.length) return;
 
-  ctx.setTransform(
-    1,
-    0,
-    0,
-    1,
-    0,
-    0
-  );
-
-  ctx.scale(
-    dpr,
-    dpr
-  );
-
-  const width =
-    rect.width;
-
-  const height =
-    rect.height;
-
-  ctx.clearRect(
-    0,
-    0,
-    width,
-    height
-  );
-
-  if (
-    !lastProjection.length
-  ) {
-    return;
-  }
-
-  const padding = {
-    top: 25,
+  const pad = {
+    left: 85,
     right: 20,
-    bottom: 60,
-    left: 80
+    top: 35,
+    bottom: 85
   };
 
-  const chartW =
-    width -
-    padding.left -
-    padding.right;
-
-  const chartH =
-    height -
-    padding.top -
-    padding.bottom;
-
-  const values =
-    lastProjection.map(
-      (row) =>
-        htPostRbToTtcPreRb(
-          row.central
-        )
-    );
+  const w = width - pad.left - pad.right;
+  const h = height - pad.top - pad.bottom;
 
   const max =
     Math.max(
-      ...values.map(
-        (v) =>
-          Math.abs(v)
-      ),
-      1
-    );
+      1,
+      ...rows.flatMap(row => [row.baseline, row.tested])
+    ) * 1.12;
 
-  ctx.strokeStyle =
-    "#dfe2e6";
+  const min = Math.min(0, ...rows.map(row => row.tested));
 
-  ctx.lineWidth = 1;
+  const py = value =>
+    pad.top + ((max - value) / (max - min)) * h;
 
-  ctx.beginPath();
+  ctx.font = "12px Arial, sans-serif";
+  ctx.fillStyle = "#555b68";
+  ctx.textAlign = "left";
+  ctx.fillText("CA projeté - HT post-RB", pad.left, 18);
 
-  ctx.moveTo(
-    padding.left,
-    padding.top
-  );
+  for (let i = 0; i <= 4; i++) {
+    const value = min + ((max - min) * i) / 4;
+    const y = py(value);
 
-  ctx.lineTo(
-    padding.left,
-    padding.top +
-      chartH
-  );
-
-  ctx.lineTo(
-    padding.left +
-      chartW,
-    padding.top +
-      chartH
-  );
-
-  ctx.stroke();
-
-  ctx.font =
-    "12px Inter, sans-serif";
-
-  ctx.fillStyle =
-    "#777";
-
-  ctx.textAlign =
-    "right";
-
-  for (
-    let i = 0;
-    i <= 4;
-    i++
-  ) {
-    const y =
-      padding.top +
-      chartH -
-      chartH *
-        i /
-        4;
-
-    const value =
-      max *
-      i /
-      4;
-
-    ctx.strokeStyle =
-      "#eef0f2";
-
+    ctx.strokeStyle = "#e8eaf0";
     ctx.beginPath();
-
-    ctx.moveTo(
-      padding.left,
-      y
-    );
-
-    ctx.lineTo(
-      padding.left +
-        chartW,
-      y
-    );
-
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(width - pad.right, y);
     ctx.stroke();
 
-    ctx.fillText(
-      compactMoney(
-        value
-      ),
-      padding.left -
-        10,
-      y + 4
-    );
+    ctx.fillStyle = "#555b68";
+    ctx.textAlign = "right";
+    ctx.fillText(compactMoney(value), pad.left - 10, y + 4);
   }
 
-  const barSpace =
-    chartW /
-    Math.max(
-      lastProjection.length,
-      1
-    );
+  const slot = w / rows.length;
+  const bar = Math.min(28, slot * 0.33);
+  const zero = py(0);
 
-  const barWidth =
-    Math.max(
-      8,
-      barSpace *
-        0.55
-    );
+  rows.forEach((row, i) => {
+    const middle = pad.left + slot * (i + 0.5);
 
-  lastProjection.forEach(
-    (row, i) => {
-      const value =
-        htPostRbToTtcPreRb(
-          row.central
-        );
-
-      const barHeight =
-        Math.abs(value) /
-        max *
-        chartH;
-
-      const x =
-        padding.left +
-        i *
-          barSpace +
-        (
-          barSpace -
-          barWidth
-        ) /
-          2;
-
-      const y =
-        padding.top +
-        chartH -
-        barHeight;
-
-      ctx.fillStyle =
-        value >= 0
-          ? "#15171a"
-          : "#b42318";
-
-      roundRect(
-        ctx,
+    [
+      [row.baseline, CHART_COLORS.baseline, middle - bar - 2],
+      [row.tested, CHART_COLORS.tested, middle + 2]
+    ].forEach(([value, color, x]) => {
+      ctx.fillStyle = color;
+      ctx.fillRect(
         x,
-        y,
-        barWidth,
-        barHeight,
-        5
+        Math.min(py(value), zero),
+        bar,
+        Math.abs(py(value) - zero)
       );
+    });
 
-      ctx.fill();
+    ctx.save();
+    ctx.translate(middle, pad.top + h + 18);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillStyle = "#555b68";
+    ctx.textAlign = "right";
+    ctx.font = "11px Arial, sans-serif";
+    ctx.fillText(shortMonth(row.date), 0, 0);
+    ctx.restore();
+  });
+}
 
-      ctx.save();
+function renderChart() {
+  const canvas = $("revenueChart");
+  if (!canvas || !lastProjection.length) return;
 
-      ctx.translate(
-        x +
-          barWidth /
-            2,
-        padding.top +
-          chartH +
-          20
-      );
+  const width = Math.max(
+    canvas.parentElement.clientWidth,
+    lastProjection.length * 55,
+    600
+  );
 
-      ctx.rotate(
-        -Math.PI /
-          5
-      );
+  canvas.style.width = `${width}px`;
+  canvas.style.height = "360px";
 
-      ctx.fillStyle =
-        "#777";
+  drawComparisonChart(
+    canvas,
+    width,
+    360,
+    window.devicePixelRatio || 1
+  );
 
-      ctx.font =
-        "11px Inter, sans-serif";
-
-      ctx.textAlign =
-        "right";
-
-      ctx.fillText(
-        shortMonth(
-          row.date
-        ),
-        0,
-        0
-      );
-
-      ctx.restore();
-    }
+  canvas.setAttribute(
+    "aria-label",
+    comparisonRows()
+      .map(
+        row =>
+          `${formatMonth(row.date)} : ` +
+          `sans test ${formatMoney(row.baseline)} HT post-RB, ` +
+          `avec test à 100 % ${formatMoney(row.tested)} HT post-RB`
+      )
+      .join(" ; ")
   );
 }
 
@@ -2449,6 +2277,48 @@ function generatePDF() {
     const simulator = new URL(window.location.href); simulator.search = ""; simulator.hash = "";
     link("Ouvrir le simulateur", safeURL(simulator.href));
     const name = (lastInputs.testTitle || "ab-test").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9_-]+/gi, "-").slice(0, 80);
+    appendComparisonPDF(doc);
     doc.save(`projection-${name}.pdf`);
   } catch (error) { showError(`Impossible de générer le PDF : ${error.message}`); }
+}
+
+function appendComparisonPDF(doc) {
+  doc.addPage("a4", "landscape");
+  doc.setTextColor(25, 31, 64); doc.setFont("helvetica", "bold"); doc.setFontSize(18);
+  doc.text("Projection du CA mois par mois", 15, 18);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+  const title = lastInputs.testTitle.trim() || "Expérience sans nom";
+  const heading = doc.splitTextToSize(title, 265).slice(0,2);
+  doc.text(heading, 15, 26);
+  doc.setFillColor(CHART_COLORS.baseline); doc.rect(15, 39, 4, 4, "F");
+  doc.text("Sans impact de l'A/B test", 22, 42);
+  doc.setFillColor(CHART_COLORS.tested); doc.rect(112, 39, 4, 4, "F");
+  doc.text("Avec 100 % de l'uplift observé", 119, 42);
+  doc.setTextColor(70, 75, 85); doc.setFontSize(9);
+  doc.text(`CA total TTC pré-RB - Part concernée : ${lastInputs.affectedShare} % - Uplift : ${signedPercent(lastResult.uplift).replace(/[\u00a0\u202f]/g," ")}`,15,50);
+  const rows = comparisonRows();
+  const left = 32, top = 60, width = 247, height = 98;
+  const max = Math.max(1, ...rows.flatMap(row => [row.baseline, row.tested])) * 1.12;
+  const min = Math.min(0, ...rows.map(row => row.tested));
+  const py = value => top + (max - value) / (max - min) * height;
+  doc.setFontSize(8);
+  for (let i = 0; i <= 4; i++) {
+    const value = min + (max - min) * i / 4, y = py(value);
+    doc.setDrawColor(230, 233, 239); doc.line(left, y, left + width, y);
+    const label = (value / 1000).toLocaleString("fr-FR", {maximumFractionDigits: 0}).replace(/[\u00a0\u202f]/g, " ") + " k EUR";
+    doc.text(label, left - 3, y + 1, {align: "right"});
+  }
+  const slot = width / rows.length, bar = Math.min(6, slot * .32), zero = py(0);
+  rows.forEach((row, i) => {
+    const middle = left + slot * (i + .5);
+    [[row.baseline, CHART_COLORS.baseline, middle-bar-.4], [row.tested, CHART_COLORS.tested, middle+.4]].forEach(([value,color,x]) => {
+      doc.setFillColor(color); doc.rect(x, Math.min(py(value),zero),bar,Math.abs(py(value)-zero),"F");
+    });
+    doc.setFontSize(rows.length > 18 ? 6 : 8);
+    doc.text(shortMonth(row.date), middle - 2, 174, {angle: 45});
+  });
+  doc.setFontSize(9);
+  doc.text("Avec test = CA sans test + CA sans test x part concernée x uplift observé (coefficient 100 %).",15,190);
+  const url = new URL(window.location.href); url.search = ""; url.hash = "";
+  if (safeURL(url.href)) doc.textWithLink("Ouvrir le simulateur",15,199,{url:url.href});
 }
