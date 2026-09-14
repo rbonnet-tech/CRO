@@ -955,14 +955,19 @@
           </h2>
 
           <p>
-            La projection respecte la saisonnalité
-            observée dans le CA HT post-RB historique.
+  Compare le CA total projeté sans impact du test et avec
+  100 % de l’uplift observé, sur la part du CA concernée.
+  Montants HT post-RB.
           </p>
 
 
+          <div class="chart-legend" aria-label="Légende du graphique">
+            <span><i class="legend-swatch baseline"></i>Sans impact de l’A/B test</span>
+            <span><i class="legend-swatch tested"></i>Avec 100 % de l’uplift observé</span>
+          </div>
           <div class="chart-wrap">
 
-            <canvas id="revenueChart"></canvas>
+            <canvas id="revenueChart" role="img" aria-label="Comparaison du CA mois par mois"></canvas>
 
           </div>
 
@@ -973,89 +978,47 @@
         <!-- TABLEAU -->
 
         <section class="card result-card">
+  <div class="table-header">
+    <div>
+      <h2>Détail de la projection</h2>
+      <p>
+        Montants HT post-RB. Gain et CA total calculés
+        selon le scénario central. 
+      </p>
+    </div>
 
+    <div class="saved-test-actions">
+      <button id="pdfBtn" class="secondary-btn" type="button">
+        Générer le PDF
+      </button>
 
-          <div class="table-header">
+      <button id="exportBtn" class="secondary-btn" type="button">
+        Exporter les résultats CSV
+      </button>
+    </div>
+  </div>
 
-            <div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Mois</th>
+          <th scope="col">
+            CA HT post-RB projeté sans déploiement du test
+          </th>
+          <th scope="col">
+            Gain HT post-RB projeté du test A/B
+          </th>
+          <th scope="col">
+            CA HT post-RB total projeté avec test déployé à 100 %
+          </th>
+        </tr>
+      </thead>
 
-              <h2>
-                Détail de la projection
-              </h2>
-
-              <p>
-                Restitution simultanée
-                en HT post-RB et TTC pré-RB.
-              </p>
-
-            </div>
-
-
-            <div class="saved-test-actions">
-
-              <button
-                id="pdfBtn"
-                class="secondary-btn"
-                type="button"
-              >
-                Générer le PDF
-              </button>
-
-
-              <button
-                id="exportBtn"
-                class="secondary-btn"
-                type="button"
-              >
-                Exporter les résultats CSV
-              </button>
-
-            </div>
-
-          </div>
-
-
-
-          <div class="table-wrapper">
-
-            <table>
-
-              <thead>
-
-                <tr>
-
-                  <th>
-                    Mois
-                  </th>
-
-                  <th>
-                    CA HT post-RB
-                  </th>
-
-                  <th>
-                    CA TTC pré-RB
-                  </th>
-
-                  <th>
-                    Gain TTC pré-RB
-                  </th>
-
-                  <th>
-                    Gain HT post-RB
-                  </th>
-
-                </tr>
-
-              </thead>
-
-
-              <tbody id="resultTable"></tbody>
-
-            </table>
-
-          </div>
-
-        </section>
+      <tbody id="resultTable"></tbody>
+    </table>
+  </div>
+</section>
 
 
 
@@ -1139,3 +1102,4 @@
 </body>
 
 </html>
+
