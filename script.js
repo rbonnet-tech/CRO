@@ -1,7 +1,8 @@
 let historicalData = [];
 let lastProjection = [];
 
-const $ = (id) => document.getElementById(id);
+// Legacy record keys remain compatible with existing saved tests.
+const $ = (id) => document.getElementById(({kameleoonUrl:"testToolUrl",resultKameleoonLink:"resultTestToolLink"})[id] || id);
 
 // ==============================
 // INDEXEDDB CONFIG
@@ -12,6 +13,7 @@ const DB_VERSION = 2;
 const TEST_STORE = "savedTests";
 let lastResult = null;
 let lastInputs = null;
+let editingTestId = null;
 const STORE_NAME = "historicalSales";
 const META_STORE = "metadata";
 
@@ -21,14 +23,10 @@ let db = null;
 // DOM
 // ==============================
 
-const csvFile = $("csvFile");
-const uploadBtn = $("uploadBtn");
-const dropZone = $("dropZone");
 const fileStatus = $("fileStatus");
 const metricType = $("metricType");
 const storedDataInfo = $("storedDataInfo");
 const storedDataText = $("storedDataText");
-const replaceCsvBtn = $("replaceCsvBtn");
 
 // ==============================
 // INIT
@@ -37,54 +35,19 @@ const replaceCsvBtn = $("replaceCsvBtn");
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     await initIndexedDB();
-    await loadStoredHistoricalData();
+    // Workbook data is loaded only after Google sign-in.
     await renderSavedTests();
   } catch (error) {
     showError(error.message);
   }
 
   updateMetricFields();
+  updateWorkspaceUI();
 });
 
 // ==============================
 // EVENTS
 // ==============================
-
-uploadBtn.addEventListener("click", () => {
-  csvFile.click();
-});
-
-if (replaceCsvBtn) {
-  replaceCsvBtn.addEventListener("click", () => {
-    csvFile.click();
-  });
-}
-
-csvFile.addEventListener("change", (event) => {
-  if (event.target.files.length) {
-    loadCSV(event.target.files[0]);
-  }
-});
-
-dropZone.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  dropZone.classList.add("dragover");
-});
-
-dropZone.addEventListener("dragleave", () => {
-  dropZone.classList.remove("dragover");
-});
-
-dropZone.addEventListener("drop", (e) => {
-  e.preventDefault();
-  dropZone.classList.remove("dragover");
-
-  const file = e.dataTransfer.files[0];
-
-  if (file) {
-    loadCSV(file);
-  }
-});
 
 metricType.addEventListener("change", updateMetricFields);
 
@@ -242,7 +205,7 @@ function loadStoredHistoricalData() {
       const metadata =
         metaRequest.result;
 
-      if (!rows.length || !metadata) {
+      if (!rows.length || !metadata || metadata.fileName !== "Google Sheet ERP") {
         resolve();
         return;
       }
@@ -318,6 +281,7 @@ function showStoredDataInfo(metadata) {
 
 function updateMetricFields() {
   const type = metricType.value;
+  updateKpiMode();
 
   $("conversionFields").classList.toggle(
     "hidden",
@@ -333,265 +297,13 @@ function updateMetricFields() {
     "hidden",
     type !== "direct"
   );
+  updateOutcomeFields();
+  updateUpliftEntry();
 }
 
 // ==============================
 // CSV
 // ==============================
-
-function loadCSV(file) {
-  if (!file.name.toLowerCase().endsWith(".csv")) {
-    showError(
-      "Le fichier doit être au format CSV."
-    );
-    return;
-  }
-
-  const reader = new FileReader();
-
-  reader.onload = async (e) => {
-    try {
-      const parsed =
-        parseCSV(
-          e.target.result
-        );
-
-      if (!parsed.length) {
-        throw new Error(
-          "Aucune donnée exploitable trouvée dans le fichier."
-        );
-      }
-
-      lastProjection = [];
-      lastResult = null;
-      $("results").classList.add("hidden");
-      historicalData =
-        parsed.sort(
-          (a, b) =>
-            a.date - b.date
-        );
-
-      await saveHistoricalDataToDB(
-        historicalData,
-        file.name
-      );
-
-      const totalHT =
-        historicalData.reduce(
-          (sum, row) =>
-            sum + row.revenue,
-          0
-        );
-
-      const totalTTC =
-        htPostRbToTtcPreRb(totalHT);
-
-      const firstDate =
-        historicalData[0].date;
-
-      const lastDate =
-        historicalData[
-          historicalData.length - 1
-        ].date;
-
-      fileStatus.innerHTML = `
-        ✓ <strong>${escapeHTML(file.name)}</strong><br>
-        ${historicalData.length.toLocaleString("fr-FR")} lignes importées ·
-        ${formatMoney(totalHT)} HT post-RB ·
-        équivalent ${formatMoney(totalTTC)} TTC pré-RB ·
-        du ${formatDate(firstDate)} au ${formatDate(lastDate)}
-      `;
-
-      fileStatus.classList.remove("hidden");
-
-      showStoredDataInfo({
-        firstDate:
-          firstDate.toISOString(),
-        lastDate:
-          lastDate.toISOString(),
-        importedAt:
-          new Date().toISOString(),
-        fileName:
-          file.name,
-        rowCount:
-          historicalData.length
-      });
-
-      hideError();
-    } catch (error) {
-      historicalData = [];
-      fileStatus.classList.add(
-        "hidden"
-      );
-
-      showError(
-        error.message
-      );
-    }
-  };
-
-  reader.readAsText(
-    file,
-    "UTF-8"
-  );
-}
-
-function parseCSV(text) {
-  text = text
-    .replace(/^\uFEFF/, "")
-    .replace(/\r/g, "")
-    .trim();
-
-  const lines =
-    text
-      .split("\n")
-      .filter(
-        (line) =>
-          line.trim()
-      );
-
-  if (lines.length < 2) {
-    throw new Error(
-      "Le CSV ne contient pas suffisamment de lignes."
-    );
-  }
-
-  const delimiter =
-    lines[0].split(";").length >
-    lines[0].split(",").length
-      ? ";"
-      : ",";
-
-  const headers =
-    splitCSVLine(
-      lines[0],
-      delimiter
-    ).map(
-      normalizeHeader
-    );
-
-  const dateIndex =
-    headers.findIndex(
-      (h) =>
-        [
-          "date",
-          "jour",
-          "day"
-        ].includes(h)
-    );
-
-  const revenueIndex =
-    headers.findIndex(
-      (h) =>
-        [
-          "ca",
-          "cahtpostrb",
-          "htpostrb",
-          "caht",
-          "revenue",
-          "revenu",
-          "chiffredaffaires",
-          "chiffreaffaires",
-          "sales",
-          "turnover"
-        ].includes(h)
-    );
-
-  if (
-    dateIndex === -1 ||
-    revenueIndex === -1
-  ) {
-    throw new Error(
-      'Le CSV doit contenir une colonne "date" et une colonne "ca_ht_post_rb" ou "ca".'
-    );
-  }
-
-  const data = [];
-
-  for (
-    let i = 1;
-    i < lines.length;
-    i++
-  ) {
-    const cells =
-      splitCSVLine(
-        lines[i],
-        delimiter
-      );
-
-    const date =
-      parseDate(
-        cells[dateIndex]
-      );
-
-    const revenue =
-      parseNumber(
-        cells[revenueIndex]
-      );
-
-    if (
-      date &&
-      Number.isFinite(revenue) &&
-      revenue >= 0
-    ) {
-      data.push({
-        date,
-        revenue
-      });
-    }
-  }
-
-  return data;
-}
-
-function splitCSVLine(
-  line,
-  delimiter
-) {
-  const result = [];
-
-  let current = "";
-  let insideQuotes = false;
-
-  for (
-    let i = 0;
-    i < line.length;
-    i++
-  ) {
-    const char =
-      line[i];
-
-    if (char === '"') {
-      if (
-        insideQuotes &&
-        line[i + 1] === '"'
-      ) {
-        current += '"';
-        i++;
-      } else {
-        insideQuotes =
-          !insideQuotes;
-      }
-    } else if (
-      char === delimiter &&
-      !insideQuotes
-    ) {
-      result.push(
-        current.trim()
-      );
-
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  result.push(
-    current.trim()
-  );
-
-  return result;
-}
 
 function normalizeHeader(
   value
@@ -763,7 +475,7 @@ function getRbRate() {
   return (
     Number(
       $("rbRate").value ||
-        24.65
+        15.34
     ) / 100
   );
 }
@@ -810,10 +522,16 @@ function htPostRbToTtcPreRb(
 
 function calculateProjection() {
   hideError();
-  const numericFields = ["affectedShare", "annualGrowth", "lowFactor", "centralFactor", "highFactor"];
+  if(!window.sharedTests?.connected()){showError('Connecte-toi à Google et configure ton classeur pour enregistrer un test.');return;}
+  if(!validateVisualInputs() || !validateOutcome()) return;
+  if(!$("testTitle").value.trim()) $("testTitle").value=`Test ${OUTCOMES[$("testOutcome").value].toLowerCase()}`;
+  if (metricType.value === "kpi") { calculateKpis(); return; }
+  if(!reliableRevenue(captureInputs())){saveObservation();return;}
+  if (sheetLoading) { showError("Attends la fin du chargement du Sheet."); return; }
+  const numericFields = [ "annualGrowth", "lowFactor", "centralFactor", "highFactor"];
   if (numericFields.some(id => !$(id).value.trim() || !Number.isFinite(Number($(id).value))) ||
       Number($("annualGrowth").value) <= -100 ||
-      ![6, 12, 18, 24].includes(Number($("projectionMonths").value)) ||
+      ![3, 6, 12, 18, 24].includes(Number($("projectionMonths").value)) ||
       !parseDate($("rolloutDate").value)) {
     showError("Vérifie la date et les hypothèses de projection."); return;
   }
@@ -821,12 +539,12 @@ function calculateProjection() {
     showError("La fin du test doit suivre son début."); return;
   }
   const link = $("kameleoonUrl")?.value.trim();
-  if (link && !safeURL(link)) { showError("Le lien Kameleoon doit être une URL HTTP ou HTTPS valide."); return; }
+  if (link && !safeURL(link)) { showError("Le lien de l’outil A/B doit être une URL HTTP ou HTTPS valide."); return; }
 
 
   if (!historicalData.length) {
     showError(
-      "Commence par importer ton historique de CA HT post-RB."
+      "Charge la base ERP depuis le Google Sheet avant de calculer."
     );
     return;
   }
@@ -834,6 +552,7 @@ function calculateProjection() {
   const uplift =
     calculateUplift();
 
+  if (uplift !== null && uplift <= 0) {showError("Un test gagnant déployé sur la base du CA doit avoir un uplift positif. Vérifie les taux ou choisis un autre résultat.");return;}
   if (uplift === null) {
     return;
   }
@@ -897,14 +616,10 @@ function calculateProjection() {
       1
   );
 
-  const affectedShare =
-    clamp(
-      Number(
-        $("affectedShare").value
-      ) / 100,
-      0,
-      1
-    );
+  let eligibility;
+  try { eligibility = readEligibility(); }
+  catch (error) { showError(error.message); return; }
+  const affectedShare = eligibility.revenueShare;
 
   const annualGrowth =
     Number(
@@ -930,149 +645,9 @@ function calculateProjection() {
         0
     ) / 100;
 
-  const seasonalProfile =
-    buildSeasonalityProfile();
-
-  const monthlyMap = {};
-
-  let baselineTotal = 0;
-  let lowTotal = 0;
-  let centralTotal = 0;
-  let highTotal = 0;
-
-  let current =
-    new Date(startDate);
-
-  while (
-    current <= endDate
-  ) {
-    const baselineHT =
-      getExpectedRevenue(
-        current,
-        seasonalProfile
-      );
-
-    if (
-      baselineHT !== null
-    ) {
-      const daysFromStart =
-        (
-          current -
-          startDate
-        ) /
-        86400000;
-
-      const growthMultiplier =
-        Math.pow(
-          Math.max(
-            0.01,
-            1 +
-              annualGrowth
-          ),
-          daysFromStart /
-            365.25
-        );
-
-      const adjustedBaselineHT =
-        baselineHT *
-        growthMultiplier;
-
-      const applicableRevenueHT =
-        adjustedBaselineHT *
-        affectedShare;
-
-      const lowGainHT =
-        applicableRevenueHT *
-        uplift *
-        lowFactor;
-
-      const centralGainHT =
-        applicableRevenueHT *
-        uplift *
-        centralFactor;
-
-      const highGainHT =
-        applicableRevenueHT *
-        uplift *
-        highFactor;
-
-      const key =
-        `${current.getFullYear()}-${String(
-          current.getMonth() +
-            1
-        ).padStart(
-          2,
-          "0"
-        )}`;
-
-      if (!monthlyMap[key]) {
-        monthlyMap[key] = {
-          date: new Date(
-            current.getFullYear(),
-            current.getMonth(),
-            1,
-            12
-          ),
-          baseline: 0,
-          low: 0,
-          central: 0,
-          high: 0
-        };
-      }
-
-      monthlyMap[key].baseline +=
-        adjustedBaselineHT;
-
-      monthlyMap[key].low +=
-        lowGainHT;
-
-      monthlyMap[key].central +=
-        centralGainHT;
-
-      monthlyMap[key].high +=
-        highGainHT;
-
-      baselineTotal +=
-        adjustedBaselineHT;
-
-      lowTotal +=
-        lowGainHT;
-
-      centralTotal +=
-        centralGainHT;
-
-      highTotal +=
-        highGainHT;
-    }
-
-    current.setDate(
-      current.getDate() +
-        1
-    );
-  }
-
-  lastProjection =
-    Object.values(
-      monthlyMap
-    ).sort(
-      (a, b) =>
-        a.date -
-        b.date
-    );
-
-  renderResults({
-    uplift,
-    months,
-    baselineTotal,
-    lowTotal,
-    centralTotal,
-    highTotal,
-    affectedShare,
-    annualGrowth,
-    lowFactor,
-    centralFactor,
-    highFactor
-  });
+  const calculated = projectRevenue(startDate, months, {uplift, affectedShare, eligibleTrafficShare:eligibility.trafficShare, annualGrowth, lowFactor, centralFactor, highFactor}, buildSeasonalityProfile());
+  lastProjection = calculated.projection;
+  renderResults(calculated.result);
 }
 
 // ==============================
@@ -1080,162 +655,12 @@ function calculateProjection() {
 // ==============================
 
 function calculateUplift() {
-  const fields = { conversion: ["convA", "convB"], basket: ["basketA", "basketB"],
-    both: ["convA", "convB", "basketA", "basketB"], direct: ["directCaA", "directCaB"] }[metricType.value];
-  if (!fields || fields.some(id => !$(id).value.trim() || !Number.isFinite(Number($(id).value)) || Number($(id).value) < 0)) {
-    showError("Renseigne toutes les valeurs A et B avec des nombres positifs ou nuls.");
+  try {
+    return measureTestUplift(captureInputs());
+  } catch (error) {
+    showError(error.message);
     return null;
   }
-
-  const type =
-    metricType.value;
-
-  if (
-    type === "conversion"
-  ) {
-    const a =
-      Number(
-        $("convA").value
-      );
-
-    const b =
-      Number(
-        $("convB").value
-      );
-
-    if (
-      !(a > 0) ||
-      !Number.isFinite(b)
-    ) {
-      showError(
-        "Renseigne les taux de conversion A et B."
-      );
-
-      return null;
-    }
-
-    return (
-      b / a -
-      1
-    );
-  }
-
-  if (
-    type === "basket"
-  ) {
-    const a =
-      Number(
-        $("basketA").value
-      );
-
-    const b =
-      Number(
-        $("basketB").value
-      );
-
-    if (
-      !(a > 0) ||
-      !Number.isFinite(b)
-    ) {
-      showError(
-        "Renseigne les paniers moyens TTC pré-RB A et B."
-      );
-
-      return null;
-    }
-
-    return (
-      b / a -
-      1
-    );
-  }
-
-  if (
-    type === "both"
-  ) {
-    const convA =
-      Number(
-        $("convA").value
-      ) / 100;
-
-    const convB =
-      Number(
-        $("convB").value
-      ) / 100;
-
-    const basketA =
-      Number(
-        $("basketA").value
-      );
-
-    const basketB =
-      Number(
-        $("basketB").value
-      );
-
-    if (
-      !(convA > 0) ||
-      !(basketA > 0) ||
-      !Number.isFinite(
-        convB
-      ) ||
-      !Number.isFinite(
-        basketB
-      )
-    ) {
-      showError(
-        "Renseigne conversion et panier moyen pour A et B."
-      );
-
-      return null;
-    }
-
-    const revenuePerVisitorA =
-      convA *
-      basketA;
-
-    const revenuePerVisitorB =
-      convB *
-      basketB;
-
-    return (
-      revenuePerVisitorB /
-        revenuePerVisitorA -
-      1
-    );
-  }
-
-  if (
-    type === "direct"
-  ) {
-    const caA =
-      Number(
-        $("directCaA").value
-      );
-
-    const caB =
-      Number(
-        $("directCaB").value
-      );
-
-    if (
-      !(caA > 0) ||
-      !Number.isFinite(caB)
-    ) {
-      showError(
-        "Renseigne le CA TTC pré-RB des versions A et B."
-      );
-
-      return null;
-    }
-
-    return (
-      caB / caA -
-      1
-    );
-  }
-
-  return null;
 }
 
 // ==============================
@@ -1415,8 +840,7 @@ function getExpectedRevenue(
   }
 
   return (
-    profile.globalAverage ||
-    null
+    Number.isFinite(profile.globalAverage) ? profile.globalAverage : null
   );
 }
 
@@ -1425,10 +849,27 @@ function getExpectedRevenue(
 // ==============================
 
 function renderResults(data, save = true) {
+  showDashboard();
+  if(save) $('dashboardMonths').value=String(data.months || dashboardMonths());
+  if (data.kind === "kpi") { renderKpiResults(data, save); return; }
+  $("kpiResults").classList.add("hidden");
   lastResult = { ...data };
   lastInputs = captureInputs();
+  if(save) saveCurrentTest().catch(error=>showError(error.message));
+  const selected = scenarioView(data,lastProjection);data=selected.result;lastProjection=selected.projection;lastResult={...data};
+  const variant = variantNumbers(lastInputs).length > 1 ? ` · ${variantLabel(retainedVariantNumber(lastInputs)).toUpperCase()}` : '';
+  $('activeScenarioHeading').textContent=`SCÉNARIO ${scenarioName().toUpperCase()} · IMPACT ESTIMÉ${variant}`;
   renderTestIdentity();
-  if (save) saveCurrentTest().catch(error => showError(error.message));
+  addOutcomeDetail($("results"),lastInputs);
+  renderResultVisuals(lastInputs, $("results"));
+  showVariantComparison($("results"), lastInputs, data);
+  renderTestComment($("results"),lastInputs);
+  $("centralScenarioLabel").textContent = `${formatPercent(data.centralFactor)} de l’uplift observé retenu`; 
+  $("eligibleTrafficResult").textContent = Number.isFinite(data.eligibleTrafficShare) ? formatPercent(data.eligibleTrafficShare) : "Non renseignée (ancien test)";
+  $("addressableShareResult").textContent = formatPercent(data.affectedShare);
+  $("addressableErpResult").textContent = formatMoney(data.baselineTotal * data.affectedShare);
+
+
   $("results").classList.remove(
     "hidden"
   );
@@ -1489,13 +930,14 @@ function renderResults(data, save = true) {
       baselineTTC
     );
 
-  $("upliftValue").textContent =
-    signedPercent(
-      data.uplift
-    );
+  const observed = observedMetricSummary(lastInputs, data);
+  $('upliftMetricLabel').textContent = observed.label;
+  $('upliftValue').textContent = observed.value;
+  $('upliftMetricChange').textContent = observed.change || '';
+  $('upliftMetricChange').hidden = !observed.change;
 
   $("periodLabel").textContent =
-    `sur les ${data.months} prochains mois`;
+    `sur ${data.months} mois à partir du ${formatDate(new Date($("rolloutDate").value + "T12:00:00"))}`;
 
   $("displayVAT").textContent =
     formatPercent(
@@ -1536,8 +978,8 @@ function renderResults(data, save = true) {
     <strong>${signedPercent(data.uplift)}</strong>
     est appliqué uniquement à
     <strong>${formatPercent(data.affectedShare)}</strong>
-    du CA concerné.
-    Le scénario central conserve
+    du CA de référence ERP projeté. Les montants GA4 servent uniquement au calcul de cette part ; la part du trafic éligible est informative et ne multiplie pas le gain.
+    Le scénario sélectionné conserve
     <strong>${formatPercent(data.centralFactor)}</strong>
     de l'uplift observé.
     Le scénario prudent retient
@@ -1589,7 +1031,7 @@ function renderTable() {
 // Both series use the saved calculation, including when a test is reloaded.
 const CHART_COLORS = {
   baseline: "#A7ABB5",
-  tested: "#191F40"
+  tested: "#415954"
 };
 
 function comparisonRows() {
@@ -1603,7 +1045,7 @@ function comparisonRows() {
       baseline,
       tested:
         baseline *
-        (1 + lastResult.uplift * lastResult.affectedShare)
+        (1 + lastResult.uplift * lastResult.affectedShare * lastResult.centralFactor)
     };
   });
 }
@@ -1636,7 +1078,7 @@ function drawComparisonChart(canvas, width, height, scale = 1) {
       ...rows.flatMap(row => [row.baseline, row.tested])
     ) * 1.12;
 
-  const min = Math.min(0, ...rows.map(row => row.tested));
+  const min = Math.min(0, ...rows.flatMap(row => [row.baseline, row.tested]));
 
   const py = value =>
     pad.top + ((max - value) / (max - min)) * h;
@@ -1719,7 +1161,7 @@ function renderChart() {
         row =>
           `${formatMonth(row.date)} : ` +
           `sans test ${formatMoney(row.baseline)} HT post-RB, ` +
-          `avec test à 100 % ${formatMoney(row.tested)} HT post-RB`
+          `avec scénario ${scenarioName()} ${formatMoney(row.tested)} HT post-RB`
       )
       .join(" ; ")
   );
@@ -1803,7 +1245,10 @@ function exportResults() {
       "CA HT post-RB",
       "CA TTC pre-RB",
       "Gain TTC pre-RB",
-      "Gain HT post-RB"
+      "Gain HT post-RB",
+      "Part trafic eligible (%)",
+      "Part CA adressable (%)",
+      "CA adressable ERP HT post-RB"
     ].join(";")
   ];
 
@@ -1841,7 +1286,10 @@ function exportResults() {
           ),
           gainHT.toFixed(
             2
-          )
+          ),
+          Number.isFinite(lastResult.eligibleTrafficShare) ? (lastResult.eligibleTrafficShare * 100).toFixed(4) : "",
+          (lastResult.affectedShare * 100).toFixed(4),
+          (baselineHT * lastResult.affectedShare).toFixed(2)
         ].join(";")
       );
     }
@@ -2135,6 +1583,7 @@ function toInputDate(
 function showError(
   message
 ) {
+  $("globalError").textContent=message;$("globalError").classList.remove("hidden");
   $("errorMessage").textContent =
     message;
 
@@ -2144,14 +1593,16 @@ function showError(
 }
 
 function hideError() {
+  $("globalError").classList.add("hidden");
   $("errorMessage").classList.add(
     "hidden"
   );
 }
 // Test history and PDF export. All data stays in this browser.
-const INPUT_IDS = ["testTitle", "kameleoonUrl", "testStart", "testEnd", "metricType",
-  "convA", "convB", "basketA", "basketB", "directCaA", "directCaB", "rolloutDate",
-  "affectedShare", "annualGrowth", "projectionMonths", "vatRate", "rbRate",
+const INPUT_IDS = ["targetPage", "targetDevice", "upliftEntryMode", "directUpliftPercent", "testOutcome", "testDecision", "testNotes", "originalVisual", "variantVisual", "variantVisual2", "variantVisual3", "variantCount", "retainedVariant", "kpiInputs", "testTitle", "kameleoonUrl", "testStart", "testEnd", "metricType",
+  "convA", "convB", "convC", "convD", "basketA", "basketB", "basketC", "basketD",
+  "directCaA", "directCaB", "directCaC", "directCaD", "directUpliftC", "directUpliftD", "rolloutDate",
+  "ga4TotalSessions", "ga4EligibleSessions", "ga4TotalRevenue", "ga4EligibleRevenue", "annualGrowth", "projectionMonths", "vatRate", "rbRate",
   "lowFactor", "centralFactor", "highFactor"];
 
 function captureInputs() {
@@ -2169,13 +1620,13 @@ function renderTestIdentity() {
   const link = $("resultKameleoonLink");
   if (!link) return;
   const url = safeURL(lastInputs.kameleoonUrl);
-  link.textContent = url ? "Voir les résultats Kameleoon" : "Lien non renseigné";
+  link.textContent = url ? `Voir les résultats ${toolName()}` : "Lien non renseigné";
   link.removeAttribute("href");
   if (url) link.href = url;
   link.rel = "noopener noreferrer";
 }
 function checkCurrentResult() {
-  if (!lastResult || !lastProjection.length) {
+  if (!lastResult || (!lastProjection.length && lastResult.kind !== "kpi")) {
     showError("Calcule d'abord les résultats."); return false;
   }
   if (JSON.stringify(captureInputs()) !== JSON.stringify(lastInputs)) {
@@ -2194,91 +1645,217 @@ function testTransaction(mode, operation) {
 }
 async function saveCurrentTest() {
   if (!lastInputs?.testTitle.trim()) return;
+  if(!window.sharedTests?.connected())throw Error('Connecte-toi à Google pour enregistrer le test.');
   const inputs = { ...lastInputs, testTitle: lastInputs.testTitle.trim() };
-  const id = JSON.stringify([inputs.testTitle, inputs.testStart, inputs.testEnd, inputs.metricType]);
-  const test = { id, inputs, result: { ...lastResult }, projection: lastProjection.map(row => ({ ...row })), updatedAt: new Date().toISOString() };
-  await testTransaction("readwrite", store => store.put(test));
+  const identity=JSON.stringify([inputs.testTitle, inputs.testStart, inputs.testEnd, inputs.metricType]);
+  const id = editingTestId || (window.sharedTests.sheetId===window.sharedTests.defaultSheetId ? identity : JSON.stringify([window.sharedTests.sheetId,identity]));
+  editingTestId = id;
+  const test = { spreadsheetId:window.sharedTests.sheetId, id, inputs, result: { ...lastResult }, projection: lastProjection.map(row => ({ ...row })), updatedAt: new Date().toISOString() };
+  let localError = null;
+  try { await testTransaction("readwrite", store => store.put(test)); } catch (error) { localError = error; }
   await renderSavedTests();
+  if (window.sharedTests?.connected()) await window.sharedTests.save(test);
+  else if (localError) throw localError;
+  else $("cloudStatus").textContent="Test sauvegardé sur cet appareil uniquement. Connecte-toi à Google, puis clique sur « Enregistrer dans le Sheet » pour partager toutes ses données.";
 }
 async function renderSavedTests() {
   const list = $("savedTestsList");
-  if (!list || !db) return;
-  const tests = await testTransaction("readonly", store => store.getAll());
+  if (!list) return;
+  if(!window.sharedTests?.connected()){list.replaceChildren();list.textContent='Connecte-toi à Google pour retrouver tes tests et commencer à en enregistrer.';updateWorkspaceUI(0);return;}
+  const currentSheetId=window.sharedTests.sheetId;
+  const allLocal = db ? await testTransaction('readonly', store => store.getAll()) : [];
+  if(!window.sharedTests.connected() || currentSheetId!==window.sharedTests.sheetId)return renderSavedTests();
+  const localTests=allLocal.filter(t=>t.spreadsheetId===window.sharedTests.sheetId || (!t.spreadsheetId && window.sharedTests.sheetId===window.sharedTests.defaultSheetId));
+  const merged = new Map(localTests.map(t=>[t.id,t]));
+  for (const remote of (window.sharedTests?.tests || [])) {
+    const local = merged.get(remote.id);
+    merged.set(remote.id, local && local.updatedAt > remote.updatedAt ? {...local, cloudSheetId:remote.cloudSheetId, pendingCloud:true} : remote);
+  }
+  updateWorkspaceUI(merged.size);
+  const tests = [...merged.values()].filter(matchesDecision).filter(matchesTargeting);
+  renderGainRecap(tests);
   list.replaceChildren();
-  if (!tests.length) { list.textContent = "Aucun test sauvegardé. Renseigne un nom puis calcule l'impact."; return; }
-  tests.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  $('dashboardStatus').textContent = historicalData.length ? `Gagnants déployés sur la base du CA fiable : gains sur ${dashboardMonths()} mois. Autres tests hors extrapolation. Les anciens tests sans statut sont à qualifier.` : (sheetLoading ? 'Chargement de la base ERP pour recalculer les gains. Les KPI restent consultables.' : 'Base ERP indisponible : les gains ne peuvent pas être recalculés. Réessaie avec le bouton ci-dessus.');
+  if (!tests.length) { list.textContent = merged.size ? "Aucun test ne correspond aux filtres sélectionnés. Modifie les filtres ou réinitialise-les." : "Aucun test enregistré. Enregistre un nouveau test pour commencer."; return; }
+  const order = $('testSort').value;
+  tests.sort((a, b) => compareSavedTests(a, b, order));
+  const profile=historicalData.length ? buildSeasonalityProfile() : null;
   for (const test of tests) {
-    const card = document.createElement("div"); card.className = "saved-test-card";
+    let displayed=null;
+    try { displayed=projectSavedTest(test,dashboardMonths(),profile); } catch { /* Missing ERP or legacy date: never show a gain for the wrong duration. */ }
+    const category=testCategory(test);
+    const card = document.createElement("div"); card.className = `saved-test-card status-${category.css}`;
     const title = document.createElement("strong"); title.textContent = test.inputs.testTitle;
+    const storage = document.createElement("small"); storage.textContent = test.pendingCloud ? "Modification locale à envoyer" : test.cloudSheetId != null ? "Enregistré dans le Sheet" : "Sur cet appareil uniquement";
     const details = document.createElement("p");
-    details.textContent = `${test.inputs.testStart || "—"} → ${test.inputs.testEnd || "—"} · ${signedPercent(test.result.uplift)} · Mis à jour le ${formatDateTime(new Date(test.updatedAt))}`;
+    details.textContent = `${test.inputs.testStart || "—"} → ${test.inputs.testEnd || "—"} · Mis à jour le ${formatDateTime(new Date(test.updatedAt))}`;
+    const summary = document.createElement("div"); summary.className = "saved-test-summary";
+    const info = document.createElement("div");
+    const formula = document.createElement("p"); formula.className = "saved-uplift-formula";
+    formula.textContent = `${signedPercent(test.result.uplift)} sur ${formatPercent(test.result.affectedShare)} du CA =`;
+    const real = document.createElement("strong"); real.className = "saved-real-uplift";
+    real.textContent = `Uplift réel ${signedPercent(test.result.uplift * test.result.affectedShare)}`;
+    const note = document.createElement("small"); note.textContent = "Sur le CA total, avant coefficient de scénario.";
+    const badge = document.createElement("span"); badge.className = "test-type-badge";
+    badge.textContent = test.result.kind === "kpi" ? "KPI · CA non fiable" : "Projection de CA";
+    const targeting=document.createElement('small');targeting.textContent=`${PAGE_LABELS[test.inputs.targetPage] || 'Page non renseignée'} · ${DEVICE_LABELS[test.inputs.targetDevice] || 'Device non renseigné'}`;
+    info.append(statusBadge(test), badge, title, targeting, storage, details, formula, real, note);
+    const gain = document.createElement("div"); gain.className = "saved-gain";
+    const gainLabel = document.createElement("span"); gainLabel.textContent = "Gain de CA HT post-RB";
+    const gainValue = document.createElement("strong"); gainValue.textContent = displayed ? signedMoney(displayed.result.centralTotal) : "—";
+    const gainNote = document.createElement("small"); gainNote.textContent = `Scénario ${scenarioName()} ${formatPercent(displayed?.result.centralFactor ?? scenarioFactor(test.result))} · ${dashboardMonths()} mois`;
+    const retained = document.createElement("small"); retained.textContent = `Uplift ${scenarioName()} sur le CA total : ${signedPercent(test.result.uplift * test.result.affectedShare * scenarioFactor(test.result))}`;
+    const ttc = document.createElement('small');
+    const vat=Number(test.inputs.vatRate)/100, rb=Number(test.inputs.rbRate)/100;
+    ttc.textContent=displayed && Number.isFinite(vat) && Number.isFinite(rb) && rb<1 ? `Gain TTC pré-RB : ${signedMoney(displayed.result.centralTotal*(1+vat)/(1-rb))}` : 'Recalcul indisponible : vérifie la base ERP et la date de mise en production.';
+    gain.append(gainLabel, gainValue, ttc, gainNote, retained); summary.append(info, gain);
+    if (test.result.kind === "kpi") {
+      ttc.remove();
+      summary.classList.add('kpi-saved-summary');
+      card.classList.add('saved-kpi-card');
+      formula.textContent = "KPI du parcours · Hors CA";
+      real.textContent = test.result.kpis.map(k => `${k.name} : ${kpiPercent(k.uplift)}`).join(" · ");
+      note.textContent = `Sur les visiteurs ciblés (${formatPercent(test.result.eligibleTrafficShare)} du trafic).`;
+      gainLabel.textContent = "Impact global estimé";
+      gainValue.textContent = test.result.kpis.map(k => `${k.name} : ${kpiPercent(k.globalUplift)}`).join(" · ");
+      gainValue.classList.add("kpi-saved-value");
+      gainNote.textContent = "Hypothèse : même taux initial hors cible.";
+      retained.textContent = "Aucun gain fiable en CA estimé";
+    }
+    if(!reliableRevenue(test.inputs,test.result) && test.result.kind!=='kpi') {
+      badge.textContent='Sans extrapolation de CA';formula.textContent='';
+      real.textContent=Number.isFinite(test.result.uplift)?observedMetricText(test.inputs, test.result):'Sans mesure chiffrée';
+      note.textContent=category.rank===3?'Renseigne le résultat et la décision via « Modifier le test ».':'';
+      gainLabel.textContent=category.decision;gainValue.textContent=category.label;ttc.remove();gainNote.textContent='';retained.textContent='Aucun gain CA extrapolé';
+    }
+    if (reliableRevenue(test.inputs, test.result) && test.inputs.metricType === 'conversion') {
+      const conversion = document.createElement('small');
+      conversion.className = 'saved-conversion';
+      conversion.textContent = observedMetricText(test.inputs, test.result);
+      formula.before(conversion);
+    }
+    if (variantNumbers(test.inputs).length > 1) {
+      const retained = document.createElement('small');
+      retained.className = 'saved-retained-variant';
+      retained.textContent = `${variantLabel(retainedVariantNumber(test.inputs))} retenue pour la synthèse`;
+      info.append(retained);
+    }
+    const visuals=visualComparison(test.inputs);
+    if(visuals){summary.classList.add('with-visuals');summary.insertBefore(visuals,gain);}
     const actions = document.createElement("div"); actions.className = "saved-test-actions";
-    const load = document.createElement("button"); load.type = "button"; load.className = "secondary-btn"; load.textContent = "Recharger";
-    load.addEventListener("click", () => {
-      for (const id of INPUT_IDS) if ($(id)) $(id).value = test.inputs[id] ?? "";
-      updateMetricFields();
-      lastProjection = test.projection.map(row => ({ ...row, date: new Date(row.date) }));
-      renderResults(test.result, false);
-      hideError();
+    const fillTest = () => {
+      editingTestId = test.id;
+      for (const id of INPUT_IDS) if ($(id)) $(id).value = test.inputs[id] ?? (id === "upliftEntryMode" ? "ab" : "");
+      restoreKpiRows(); updateMetricFields(); updateEligibilityPreview(); hideError();
+    };
+    const description = previewTestComment(test.inputs.testNotes);
+    const load = document.createElement('button');
+    load.type = 'button';
+    load.className = description ? 'saved-read-more' : 'secondary-btn';
+    load.textContent = description ? 'Voir plus' : 'Voir les détails';
+    if (description) load.setAttribute('aria-label', `Voir plus sur ${test.inputs.testTitle}`);
+    load.addEventListener('click',()=>{
+      fillTest();
+      if(test.result.kind==='kpi') renderKpiResults(test.result,false);
+      else if(displayed) { $('projectionMonths').value=String(dashboardMonths()); lastProjection=displayed.projection;renderResults(displayed.result,false); }
+      else renderObservation({kind:'observation',uplift:test.result.uplift ?? null},false,reliableRevenue(test.inputs,test.result));
+      const heading = displayed ? $('resultTestTitle') : $('kpiResults').querySelector('h2');
+      if (heading) {
+        heading.tabIndex = -1;
+        heading.focus({ preventScroll: true });
+      }
     });
+    if (description) {
+      const preview = document.createElement('p');
+      preview.className = 'saved-description';
+      preview.append(description, ' ', load);
+      info.append(preview);
+    }
+    const edit = document.createElement('button');edit.type='button';edit.className='secondary-btn';edit.textContent='Modifier le test';
+    edit.addEventListener('click',()=>{fillTest();showTestEditor(false);});
     const remove = document.createElement("button"); remove.type = "button"; remove.className = "secondary-btn"; remove.textContent = "Supprimer";
     remove.addEventListener("click", async () => {
-      if (!window.confirm(`Supprimer le test « ${test.inputs.testTitle} » ?`)) return;
-      try { await testTransaction("readwrite", store => store.delete(test.id)); await renderSavedTests(); }
+      if (!window.confirm(`Supprimer le test « ${test.inputs.testTitle} » ${test.cloudSheetId != null ? "du Sheet pour tous les appareils et de cet appareil" : "de cet appareil"} ?`)) return;
+      try { if(test.cloudSheetId != null) await window.sharedTests.remove(test); if(db) await testTransaction("readwrite", store => store.delete(test.id)); await renderSavedTests(); }
       catch (error) { showError(error.message); }
     });
-    actions.append(load, remove); card.append(title, details, actions); list.append(card);
+    const sync = document.createElement("button"); sync.type="button";sync.className="secondary-btn";sync.textContent="Enregistrer dans le Sheet";
+    sync.addEventListener("click",async()=>{sync.disabled=true;try{await window.sharedTests.save(test);}catch(error){showError(error.message);}finally{sync.disabled=false;}});
+    if (!description) actions.append(load);
+    actions.append(edit, sync, remove); card.append(summary, actions); list.append(card);
   }
 }
 function formatMoneyPDF(value) {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 }).format(value).replace(/[\u00a0\u202f]/g, " ") + " EUR";
 }
 function signedMoneyPDF(value) { return (value > 0 ? "+" : "") + formatMoneyPDF(value); }
-function generatePDF() {
+function generatePDF(event) {
   if (!checkCurrentResult()) return;
   if (!window.jspdf?.jsPDF) { showError("La bibliothèque jsPDF n'est pas chargée. Vérifie son inclusion dans le HTML."); return; }
   try {
     const doc = new window.jspdf.jsPDF({ unit: "mm", format: "a4" });
-    let y = 20;
-    const text = (value, size = 11, bold = false) => {
-      doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setFontSize(size);
-      const lines = doc.splitTextToSize(String(value).replace(/[\u00a0\u202f]/g, " "), 170);
-      for (const line of lines) {
-        if (y > 275) { doc.addPage(); y = 20; }
-        doc.text(line, 20, y); y += size * 0.45 + 2;
-      }
+    const clean = value => String(value).replace(/[\u00a0\u202f]/g, " ").replace(/[’]/g, "'");
+    const write = (value, x, y, size = 10, bold = false, color = "#15171a", width = 174) => {
+      doc.setFont("helvetica", bold ? "bold" : "normal"); doc.setFontSize(size); doc.setTextColor(color);
+      const lines = doc.splitTextToSize(clean(value), width);
+      doc.text(lines, x, y); return lines.length * size * .4;
     };
-    const link = (label, url) => {
-      if (!url) return;
-      if (y > 275) { doc.addPage(); y = 20; }
-      doc.setFontSize(10); doc.setTextColor(40, 80, 180);
-      doc.textWithLink(label, 20, y, { url }); doc.setTextColor(0, 0, 0); y += 10;
+    const money = (value, x, y, width = 76) => {
+      const label = signedMoneyPDF(value); doc.setFont("helvetica", "bold"); doc.setFontSize(25);
+      const size = Math.min(25, 25 * width / Math.max(1, doc.getTextWidth(label)));
+      write(label, x, y, size, true, "#ffffff", width);
     };
-    text("A/B TEST - ESTIMATION", 11, true);
-    text(lastInputs.testTitle.trim() || "Expérience sans nom", 20, true);
     const date = value => value ? formatDate(parseDate(value)) : "Non renseignée";
-    text(`Période du test : ${date(lastInputs.testStart)} au ${date(lastInputs.testEnd)}`, 10);
-    link("Voir les résultats Kameleoon", safeURL(lastInputs.kameleoonUrl));
-    text(`Uplift observé : ${signedPercent(lastResult.uplift)}`, 16, true);
-    text(`Projection sur ${lastResult.months} mois à partir du ${date(lastInputs.rolloutDate)}`, 12, true);
-    const equivalent = value => value / (1 - Number(lastInputs.rbRate || 24.65) / 100) * (1 + Number(lastInputs.vatRate || 20) / 100);
-    text(`CA de référence : ${formatMoneyPDF(lastResult.baselineTotal)} HT post-RB`, 10);
-    text(`Équivalent : ${formatMoneyPDF(equivalent(lastResult.baselineTotal))} TTC pré-RB`, 10);
-    y += 4;
-    for (const [label, key] of [["Prudent", "lowTotal"], ["Central", "centralTotal"], ["Haut", "highTotal"]]) {
-      text(`Scénario ${label} - gain estimé`, 12, true);
-      text(`${signedMoneyPDF(equivalent(lastResult[key]))} TTC pré-RB`, 14, true);
-      text(`${signedMoneyPDF(lastResult[key])} HT post-RB`, 11); y += 3;
+    const equivalent = value => value / (1 - Number(lastInputs.rbRate || 15.34) / 100) * (1 + Number(lastInputs.vatRate || 20) / 100);
+    doc.setFillColor("#415954"); doc.rect(0, 0, 210, 4, "F");
+    write("A/B TEST  /  SYNTHÈSE D'IMPACT", 18, 17, 9, true, "#606873");
+    let y = 29;
+    y += write(lastInputs.testTitle.trim() || "Expérience sans nom",18,y,20,true);
+    y += 5;
+    y += write(`Test : ${date(lastInputs.testStart)} au ${date(lastInputs.testEnd)}`,18,y,9,false,"#606873");
+    y += 7;
+    y += write(`Projection sur ${lastResult.months} mois à partir du ${date(lastInputs.rolloutDate)}`,18,y,11,true);
+    y += 7;
+    // Keep long experiment titles readable without colliding with the summary.
+    if (y > 72) { doc.addPage(); y = 20; }
+    doc.setFillColor("#415954"); doc.rect(18,y,174,53,"F");
+    write(`SCÉNARIO ${scenarioName().toUpperCase()}  /  ${formatPercent(lastResult.centralFactor)} DE L'UPLIFT RETENU`,25,y+10,10,true,"#ffffff",160);
+    write("Gain de CA HT post-RB",25,y+22,11,false,"#ffffff",76);
+    write("Gain TTC pré-RB",111,y+22,11,false,"#ffffff",74);
+    money(lastResult.centralTotal,25,y+36);
+    money(equivalent(lastResult.centralTotal),111,y+36,74);
+    const observed = observedMetricText(lastInputs, lastResult).replace(' → ', ' à ');
+    write(`${observed}  |  Uplift du scénario ${signedPercent(lastResult.uplift * lastResult.centralFactor)}`,25,y+46,9,false,"#ffffff",160);
+    y += 65;
+    write("BASE DE LA PROJECTION",18,y,10,true); y += 8;
+    const row = (label,value) => {write(label,18,y,10,false,"#606873",99);write(value,121,y,10,true,"#15171a",71);y+=8;};
+    row(`CA de référence ${erpName()} · HT post-RB`,formatMoneyPDF(lastResult.baselineTotal));
+    row("Part du CA adressable",formatPercent(lastResult.affectedShare));
+    row(`CA adressable ${erpName()} · HT post-RB`,formatMoneyPDF(lastResult.baselineTotal * lastResult.affectedShare));
+    row("Part des visiteurs éligibles",Number.isFinite(lastResult.eligibleTrafficShare) ? formatPercent(lastResult.eligibleTrafficShare) : "Non renseignée");
+    y += 2;
+    y += write("Gain du scénario = CA adressable ERP × uplift observé × coefficient du scénario. Les montants GA4 servent uniquement à calculer la part adressable ; le CA projeté provient de l'ERP.",18,y,9,false,"#606873");
+    y += 10;
+    doc.setFillColor("#f2f4f3");doc.rect(18,y,174,30,"F");
+    write("AUTRES SCÉNARIOS",24,y+7,8,true,"#68716d");
+    for (const [label,key,factor,x] of [["Prudent","lowTotal","lowFactor",24],["Haut","highTotal","highFactor",110]]) {
+      write(`${label} · ${lastInputs[factor]} % de l'uplift`,x,y+14,9,true,"#606873",76);
+      write(`${signedMoneyPDF(lastResult[key])} HT post-RB`,x,y+20,9,false,"#606873",76);
+      write(`${signedMoneyPDF(equivalent(lastResult[key]))} TTC pré-RB`,x,y+26,9,false,"#606873",76);
     }
-    text(`Part du CA concernée : ${lastInputs.affectedShare} % ; croissance annuelle : ${lastInputs.annualGrowth} %.`, 9);
-    text(`Uplift retenu : prudent ${lastInputs.lowFactor} %, central ${lastInputs.centralFactor} %, haut ${lastInputs.highFactor} %.`, 9);
-    text(`TVA : ${lastInputs.vatRate} % ; RB : ${lastInputs.rbRate} %.`, 9);
-    text("Estimation basée sur la saisonnalité historique et les hypothèses saisies. Les gains futurs ne sont pas garantis.", 9);
+    y += 39;
+    y += write(`Hypothèses : croissance annuelle ${lastInputs.annualGrowth} % · TVA ${lastInputs.vatRate} % · RB ${lastInputs.rbRate} %.`,18,y,8,false,"#6b7179");
+    y += 5;
+    y += write("Estimation saisonnalisée selon l'historique ERP et les hypothèses saisies. Les gains futurs ne sont pas garantis.",18,y,8,false,"#6b7179");
+    y += 9;
     const simulator = new URL(window.location.href); simulator.search = ""; simulator.hash = "";
-    link("Ouvrir le simulateur", safeURL(simulator.href));
+    doc.setFontSize(9);doc.setTextColor("#15171a");
+    if (safeURL(lastInputs.kameleoonUrl)) doc.textWithLink(`Résultats ${toolName()}`,18,y,{url:safeURL(lastInputs.kameleoonUrl)});
+    doc.textWithLink("Ouvrir le simulateur",125,y,{url:safeURL(simulator.href)});
     const name = (lastInputs.testTitle || "ab-test").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9_-]+/gi, "-").slice(0, 80);
+    appendCommentPDF(doc,lastInputs.testNotes,y+12);
     appendComparisonPDF(doc);
-    doc.save(`projection-${name}.pdf`);
+    return downloadTestPDF(doc, lastInputs, `projection-${name}.pdf`, event?.currentTarget);
   } catch (error) { showError(`Impossible de générer le PDF : ${error.message}`); }
 }
 
@@ -2293,13 +1870,13 @@ function appendComparisonPDF(doc) {
   doc.setFillColor(CHART_COLORS.baseline); doc.rect(15, 39, 4, 4, "F");
   doc.text("Sans impact de l'A/B test", 22, 42);
   doc.setFillColor(CHART_COLORS.tested); doc.rect(112, 39, 4, 4, "F");
-  doc.text("Avec 100 % de l'uplift observé", 119, 42);
+  doc.text(`Avec le scénario ${scenarioName()}`, 119, 42);
   doc.setTextColor(70, 75, 85); doc.setFontSize(9);
-  doc.text(`CA total TTC pré-RB - Part concernée : ${lastInputs.affectedShare} % - Uplift : ${signedPercent(lastResult.uplift).replace(/[\u00a0\u202f]/g," ")}`,15,50);
+  doc.text(`CA total HT post-RB - Part du CA adressable : ${formatPercent(lastResult.affectedShare)} - Uplift : ${signedPercent(lastResult.uplift).replace(/[\u00a0\u202f]/g," ")}`,15,50);
   const rows = comparisonRows();
   const left = 32, top = 60, width = 247, height = 98;
   const max = Math.max(1, ...rows.flatMap(row => [row.baseline, row.tested])) * 1.12;
-  const min = Math.min(0, ...rows.map(row => row.tested));
+  const min = Math.min(0, ...rows.flatMap(row => [row.baseline, row.tested]));
   const py = value => top + (max - value) / (max - min) * height;
   doc.setFontSize(8);
   for (let i = 0; i <= 4; i++) {
@@ -2318,7 +1895,66 @@ function appendComparisonPDF(doc) {
     doc.text(shortMonth(row.date), middle - 2, 174, {angle: 45});
   });
   doc.setFontSize(9);
-  doc.text("Avec test = CA sans test + CA sans test x part concernée x uplift observé (coefficient 100 %).",15,190);
+  doc.text("Avec test = CA sans test + CA sans test x part concernée x uplift observé (coefficient du scénario sélectionné).",15,190);
   const url = new URL(window.location.href); url.search = ""; url.hash = "";
   if (safeURL(url.href)) doc.textWithLink("Ouvrir le simulateur",15,199,{url:url.href});
 }
+// GA4 amounts establish ratios only; ERP remains the projection baseline.
+function readEligibility() {
+  if (metricType.value === "kpi") return {trafficShare: readKpiTraffic(), revenueShare: 0};
+  const ids = ["ga4TotalSessions", "ga4EligibleSessions", "ga4TotalRevenue", "ga4EligibleRevenue"];
+  const values = ids.map(id => $(id).value.trim());
+  if (values.some(value => value === "" || !Number.isFinite(Number(value)))) throw new Error("Renseigne les quatre valeurs GA4 pour calculer les parts éligibles.");
+  const [sessions, eligibleSessions, revenue, eligibleRevenue] = values.map(Number);
+  if (!Number.isSafeInteger(sessions) || sessions <= 0 || !Number.isSafeInteger(eligibleSessions) || eligibleSessions < 0 || eligibleSessions > sessions) throw new Error("Les visiteurs doivent être des entiers : total supérieur à zéro, visiteurs éligibles compris entre zéro et le total.");
+  if (revenue <= 0 || eligibleRevenue < 0 || eligibleRevenue > revenue) throw new Error("Le CA total GA4 doit être supérieur à zéro et le CA éligible compris entre zéro et ce total.");
+  return { trafficShare: eligibleSessions / sessions, revenueShare: eligibleRevenue / revenue };
+}
+function updateEligibilityPreview() {
+  try {
+    const ratios = readEligibility();
+    $("trafficSharePreview").textContent = formatPercent(ratios.trafficShare);
+    $("revenueSharePreview").textContent = formatPercent(ratios.revenueShare);
+    const traffic = formatPercent(ratios.trafficShare);
+    if (metricType.value === "kpi") {
+      $("eligibilitySummary").textContent = `Pour ce test, ${traffic} des visiteurs ont été ciblés. Cette part sert à pondérer l’évolution des KPI à l’échelle du site.`;
+      return;
+    }
+    const revenue = formatPercent(ratios.revenueShare);
+    $("eligibilitySummary").textContent = `Pour ce test, ${traffic} des visiteurs ont été ciblés. Ces ${traffic} de visiteurs ont généré ${revenue} du CA total sur la période du test.`;
+  } catch {
+    $("trafficSharePreview").textContent = "—";
+    $("revenueSharePreview").textContent = "—";
+    $("eligibilitySummary").textContent = metricType.value === "kpi" ? "Renseigne les deux nombres de visiteurs GA4 pour calculer la part ciblée." : "Renseigne les quatre données GA4 avec des valeurs valides pour voir la part des visiteurs ciblés et leur contribution au CA.";
+  }
+}
+["ga4TotalSessions", "ga4EligibleSessions", "ga4TotalRevenue", "ga4EligibleRevenue"].forEach(id => $(id).addEventListener("input", updateEligibilityPreview));
+
+// Public Google Sheet: Google Visualization callback works across origins without credentials.
+let sheetLoading = false;
+function parseSheetResponse(response) {
+  if (response.status !== "ok" || !response.table) throw new Error("Le Sheet n'a pas renvoyé de données exploitables.");
+  const {cols, rows} = response.table;
+  const dateIndex = cols.findIndex(c => normalizeHeader(c.label) === "date");
+  const revenueIndex = cols.findIndex(c => normalizeHeader(c.label) === "cahtpostrb");
+  if (dateIndex < 0 || revenueIndex < 0) throw new Error("Le Sheet doit contenir les colonnes date et ca_ht_post_rb.");
+  const data = [];
+  for (const row of rows) {
+    const d = row.c?.[dateIndex], r = row.c?.[revenueIndex];
+    if (d?.v == null && r?.v == null) continue;
+    const match = String(d?.v ?? "").match(/^Date\((\d+),(\d+),(\d+)\)$/);
+    const date = match ? createSafeDate(+match[1], +match[2], +match[3]) : parseDate(d?.f || d?.v);
+    const revenue = parseNumber(r?.v);
+    if (!date || !Number.isFinite(revenue)) throw new Error("Une ligne du Sheet contient une date ou un CA invalide. Corrige-la avant d'actualiser.");
+    data.push({date, revenue});
+  }
+  if (!data.length) throw new Error("Le Sheet est vide.");
+  data.sort((a,b) => a.date-b.date);
+  if (new Set(data.map(r => toInputDate(r.date))).size !== data.length) throw new Error("Le Sheet contient plusieurs lignes pour une même date.");
+  return data;
+}
+async function refreshSheetData(){
+  if(!window.sharedTests?.connected()){showError('Connecte-toi à Google pour charger le CA de ton classeur, ou importe un CSV.');return;}
+  try{await window.sharedTests.refresh();}catch(error){showError(error.message);}
+}
+$('refreshSheetBtn').addEventListener('click',refreshSheetData);

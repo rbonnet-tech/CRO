@@ -9,45 +9,51 @@
     content="width=device-width, initial-scale=1.0"
   >
 
-  <title>AB Test Revenue Calculator</title>
+  <title>Experimentation revenue calculator</title>
+  <meta name="description" content="Estimez l’impact de vos tests A/B avec votre historique de chiffre d’affaires, des scénarios saisonniers et des exports CSV et PDF.">
 
   <link
     rel="stylesheet"
-    href="style.css"
+    href="style.css?v=24-1"
   >
+<link rel="icon" type="image/svg+xml" href="favicon.svg?v=24">
 </head>
 
 <body>
 
-  <div class="app">
+  <header class="saas-header">
+<div class="header-top">
+<button id="openNavigation" class="menu-toggle" type="button" aria-label="Ouvrir le menu" aria-controls="navigationDialog" aria-expanded="false"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M4 8h24M4 16h24M4 24h24" fill="none" stroke="currentColor" stroke-width="2.5"/></svg></button>
+<a class="saas-brand" href="#" aria-label="Site de la marque"><img id="workspaceLogo" src="favicon.svg" alt="Logo de l’espace"></a>
+<h1 class="calculator-title">Experimentation revenue calculator</h1>
+</div>
+<div class="header-bottom"><div id="desktopNavigationSlot"><nav class="dashboard-nav" aria-label="Navigation du calculateur">
+<a id="resultsTab" href="#resultats" class="nav-page">Résultats</a>
+<a id="newTestBtn" href="#nouveau-test" class="nav-page">Enregistrer un test</a>
+<a id="configurationTab" href="#configuration" class="nav-page" aria-current="page">Configuration</a>
+</nav></div></div>
+</header>
+<section id="resultsFiltersBar" class="results-subheader hidden" aria-label="Filtres des résultats">
+<div class="subheader-inner">
+<span class="filters-caption">Filtres des résultats</span>
+<div id="desktopFilterSlot"><div class="header-filters">
+<label>Durée · CA fiable<select id="dashboardMonths"><option value="3">3 mois</option><option value="6">6 mois</option><option value="12" selected>12 mois</option></select></label>
+<label>Scénario<select id="scenarioFilter"><option value="central">Central · 70 % par défaut</option><option value="low">Prudent · 50 % par défaut</option><option value="high">Haut · 100 % par défaut</option></select></label>
+<label>Trier les tests<select id="testSort"><option value="priority">Priorité du résultat</option><option value="recent">Du plus récent au plus ancien</option><option value="oldest">Du plus ancien au plus récent</option></select></label>
+</div></div><button id="openFilters" class="primary-btn" type="button" aria-haspopup="dialog" aria-controls="filtersDialog">Filtrer</button>
+</div>
+</section>
+<div class="app">
 
     <!-- =========================
          HEADER
     ========================== -->
 
-    <header>
-
-      <div>
-
-        <p class="eyebrow">
-          E-COMMERCE • A/B TEST
-        </p>
-
-        <h1>
-          AB Test Revenue Calculator
-        </h1>
-
-        <p class="subtitle">
-          Estime l'impact annuel d'un A/B test
-          en tenant compte de la saisonnalité réelle de ton CA.
-        </p>
-
-      </div>
-
-    </header>
-
-
     <main>
+
+<div id="globalError" class="error hidden" role="alert"></div>
+<div id="testEditor" class="hidden">
+<button id="backToResults" type="button" class="secondary-btn">← Retour aux résultats</button>
 
 
       <!-- =========================
@@ -70,8 +76,7 @@
             </h2>
 
             <p>
-              Identifie l'expérience puis charge la base de CA
-              utilisée pour la projection.
+              Identifie l'expérience. Le CA ERP est chargé depuis le Google Sheet commun.
             </p>
 
           </div>
@@ -98,11 +103,11 @@
 
           <label>
 
-            Lien vers les résultats Kameleoon
+            Lien vers les résultats de l’outil A/B
 
             <input
               type="url"
-              id="kameleoonUrl"
+              id="testToolUrl"
               placeholder="https://..."
             >
 
@@ -111,30 +116,25 @@
         </div>
 
 
-        <!-- BASE INDEXEDDB -->
-
-        <div
-          id="storedDataInfo"
-          class="stored-data-info hidden"
-        >
-
-          <strong>
-            Base enregistrée
-          </strong>
-
-          <p id="storedDataText"></p>
-
-          <button
-            id="replaceCsvBtn"
-            class="secondary-btn"
-            type="button"
-          >
-            Importer un nouveau CSV pour mise à jour
-          </button>
-
-        </div>
-
-
+<div class="grid two targeting-fields">
+<label>Page ciblée<select id="targetPage" required><option value="">Choisir une page</option><option value="pdp">PDP</option><option value="plp">PLP</option><option value="hp">HP</option><option value="side_cart">Side cart</option><option value="header">Header</option><option value="other">Autre</option></select></label>
+<label>Device<select id="targetDevice" required><option value="">Choisir un device</option><option value="mobile">Mobile</option><option value="desktop">Desktop</option><option value="both">Tous</option></select></label>
+</div>
+<div class="grid two outcome-fields">
+<label>Résultat<select id="testOutcome"><option value="">Choisir un résultat</option><option value="won">Gagnant</option><option value="promising">Encourageant</option><option value="mixed">Mitigé</option><option value="lost">Perdant</option></select></label>
+<label>Décision<select id="testDecision"><option value="">Choisir une décision</option><option value="revenue">Déployé sur la base du CA</option><option value="unreliable">Déployé sans gain CA fiable</option><option value="deployed">Déployé</option><option value="not_deployed">Non déployé</option></select></label>
+</div>
+<p class="field-help">Pour un test non concluant, choisis « Mitigé ». L’extrapolation financière est réservée à « Gagnant » + « Déployé sur la base du CA ».</p>
+<label>Conclusion du test (facultatif)<textarea id="testNotes" maxlength="2000" rows="3" placeholder="Ex. : résultat non concluant, aucun déploiement retenu."></textarea></label>
+<details class="sheet-source sheet-source-compact hidden" data-connected-only>
+<summary>Source du CA ERP · Google Sheet</summary>
+<p>Le CA de la première feuille est synchronisé après connexion.</p>
+<div class="saved-test-actions"><button id="refreshSheetBtn" class="secondary-btn" type="button">Actualiser</button>
+<a id="activeSheetLink" href="#" target="_blank" rel="noopener noreferrer">Ouvrir le Sheet</a></div>
+<div id="storedDataInfo" class="hidden"><p id="storedDataText"></p></div>
+<div role="status" id="fileStatus" class="hidden"></div>
+</details>
+<p id="sheetStatus" class="sheet-status-compact" role="status" aria-live="polite">Aucun historique chargé. Connecte-toi ou importe un CSV.</p>
         <!-- RÉFÉRENTIEL -->
 
         <div class="financial-reference">
@@ -146,75 +146,11 @@
           <p>
             L'historique est calculé en CA HT post-RB.
             Les équivalents TTC pré-RB utilisent une TVA de 20 %
-            et un taux de RB annuel moyen de 24,65 %.
+            et un taux de RB annuel moyen de 15,34 %.
           </p>
 
         </div>
 
-
-        <!-- IMPORT -->
-
-        <div
-          class="upload-zone"
-          id="dropZone"
-        >
-
-          <input
-            type="file"
-            id="csvFile"
-            accept=".csv,text/csv"
-            hidden
-          >
-
-
-          <button
-            class="primary-btn"
-            id="uploadBtn"
-            type="button"
-          >
-            Importer un CSV
-          </button>
-
-
-          <p>
-            ou glisse ton fichier ici
-          </p>
-
-
-          <small>
-            Exemple :
-            date,ca_ht_post_rb → 2025-01-01,24500
-          </small>
-
-        </div>
-
-
-        <div
-          id="fileStatus"
-          class="status hidden"
-        ></div>
-
-
-        <!-- FORMAT CSV -->
-
-        <details>
-
-          <summary>
-            Voir le format CSV attendu
-          </summary>
-
-          <pre>date,ca_ht_post_rb
-2025-01-01,22450
-2025-01-02,24120
-2025-01-03,23890
-2025-01-04,26780</pre>
-
-          <p class="small">
-            Les dates JJ/MM/AAAA sont également acceptées.
-            Les séparateurs "," et ";" fonctionnent.
-          </p>
-
-        </details>
 
       </section>
 
@@ -286,8 +222,10 @@
           Métrique
 
           <select id="metricType">
+<option value="observation">Sans mesure chiffrée exploitable</option>
+<option value="kpi">KPI du parcours — uniquement si le gain de CA n’est pas fiable</option>
 
-            <option value="conversion">
+            <option value="conversion" selected>
               Taux de conversion
             </option>
 
@@ -300,7 +238,7 @@
             </option>
 
             <option value="direct">
-              CA direct A / B
+              CA direct par version
             </option>
 
           </select>
@@ -308,7 +246,31 @@
         </label>
 
 
-        <!-- CONVERSION -->
+<div class="variant-tools">
+  <input type="hidden" id="variantCount" value="1">
+  <div class="saved-test-actions">
+    <button type="button" id="addTestVariant" class="secondary-btn">+ Ajouter la variante 2</button>
+    <button type="button" id="removeTestVariant" class="secondary-btn hidden">Retirer la variante 2</button>
+  </div>
+  <label id="retainedVariantField" class="hidden">Variante retenue pour la synthèse
+    <select id="retainedVariant"><option value="1" selected>Variante 1</option><option value="2">Variante 2</option><option value="3">Variante 3</option></select>
+    <small class="field-help">La synthèse et la projection de CA éventuelle utilisent cette variante. Les autres restent consultables dans le détail du test.</small>
+  </label>
+</div>
+<div id="upliftEntryFields">
+  <label>Saisie du résultat<select id="upliftEntryMode"><option value="ab">Valeurs par version</option><option value="direct">Uplift directement en %</option></select></label>
+  <label id="directUpliftField" class="hidden">Uplift de la variante 1 (%)<input id="directUpliftPercent" type="number" min="-100" step="any" placeholder="Ex. : 5 ou -4,32" aria-describedby="directUpliftHelp"></label>
+  <label data-extra-variant="2" data-entry-mode="direct" class="hidden">Uplift de la variante 2 (%)<input id="directUpliftC" type="number" min="-100" step="any" aria-describedby="directUpliftHelp"></label>
+  <label data-extra-variant="3" data-entry-mode="direct" class="hidden">Uplift de la variante 3 (%)<input id="directUpliftD" type="number" min="-100" step="any" aria-describedby="directUpliftHelp"></label>
+  <p id="directUpliftHelp" class="field-help hidden">Saisis la variation de chaque variante par rapport à l’original. Pour « Conversion + panier », saisis l’uplift combiné.</p>
+</div>
+<div id="kpiFields" class="hidden">
+<p class="kpi-mode-help"><strong>À choisir uniquement si le gain de CA du test n’est pas fiable.</strong> Suis ici les progrès dans le parcours, sans leur attribuer un gain de CA fiable.</p>
+<p>Compare les taux de chaque variante à l’original sur la même période et le même périmètre. Pour un test mobile, saisis les visiteurs mobiles concernés et conserve le total GA4 de tout le site pour estimer l’impact global.</p>
+<div id="kpiRows"></div><button type="button" id="addKpi" class="secondary-btn">+ Ajouter un KPI</button>
+<input type="hidden" id="kpiInputs" value="[]">
+</div>
+<!-- CONVERSION -->
 
         <div id="conversionFields">
 
@@ -316,7 +278,7 @@
 
             <label>
 
-              Conversion A (%)
+              Conversion de l’original (%)
 
               <input
                 type="number"
@@ -330,7 +292,7 @@
 
             <label>
 
-              Conversion B (%)
+              Conversion de la variante 1 (%)
 
               <input
                 type="number"
@@ -340,6 +302,9 @@
               >
 
             </label>
+
+            <label data-extra-variant="2" class="hidden">Conversion de la variante 2 (%)<input type="number" id="convC" step="any" min="0"></label>
+            <label data-extra-variant="3" class="hidden">Conversion de la variante 3 (%)<input type="number" id="convD" step="any" min="0"></label>
 
           </div>
 
@@ -357,7 +322,7 @@
 
             <label>
 
-              Panier moyen A — TTC pré-RB (€)
+              Panier moyen original · TTC pré-RB (€)
 
               <input
                 type="number"
@@ -371,7 +336,7 @@
 
             <label>
 
-              Panier moyen B — TTC pré-RB (€)
+              Panier moyen variante 1 · TTC pré-RB (€)
 
               <input
                 type="number"
@@ -381,6 +346,9 @@
               >
 
             </label>
+
+            <label data-extra-variant="2" class="hidden">Panier moyen variante 2 · TTC pré-RB (€)<input type="number" id="basketC" step="any" min="0"></label>
+            <label data-extra-variant="3" class="hidden">Panier moyen variante 3 · TTC pré-RB (€)<input type="number" id="basketD" step="any" min="0"></label>
 
           </div>
 
@@ -404,7 +372,7 @@
 
             <label>
 
-              CA version A — TTC pré-RB (€)
+              CA original · TTC pré-RB (€)
 
               <input
                 type="number"
@@ -418,7 +386,7 @@
 
             <label>
 
-              CA version B — TTC pré-RB (€)
+              CA variante 1 · TTC pré-RB (€)
 
               <input
                 type="number"
@@ -429,17 +397,28 @@
 
             </label>
 
+            <label data-extra-variant="2" class="hidden">CA variante 2 · TTC pré-RB (€)<input type="number" id="directCaC" step="any" min="0"></label>
+            <label data-extra-variant="3" class="hidden">CA variante 3 · TTC pré-RB (€)<input type="number" id="directCaD" step="any" min="0"></label>
+
           </div>
 
 
           <p class="helper-text">
-            Saisis le CA total observé sur la même période
-            pour les versions A et B.
-            À utiliser lorsque les deux versions ont reçu
-            une exposition comparable.
+            Saisis le CA total observé sur la même période pour chaque version. Utilise cette mesure si les versions ont reçu une exposition comparable.
           </p>
 
         </div>
+
+        <fieldset class="variant-visual-fields">
+          <legend>Aperçus (facultatif)</legend>
+          <p id="visualHelp" class="field-help">Ajoute un lien par ligne. Le premier sert de vignette et la galerie permet de parcourir tous les aperçus. Utilise un lien HTTPS direct pour les GIF animés ou un lien Drive accessible aux personnes qui consultent le test.</p>
+          <div class="grid two visual-fields">
+            <label>Original<textarea id="originalVisual" placeholder="Liens des images ou GIF" rows="3" aria-describedby="visualHelp"></textarea></label>
+            <label>Variante 1<textarea id="variantVisual" placeholder="Liens des images ou GIF" rows="3" aria-describedby="visualHelp"></textarea></label>
+            <label data-extra-variant="2" class="hidden">Variante 2<textarea id="variantVisual2" placeholder="Liens des images ou GIF" rows="3" aria-describedby="visualHelp"></textarea></label>
+            <label data-extra-variant="3" class="hidden">Variante 3<textarea id="variantVisual3" placeholder="Liens des images ou GIF" rows="3" aria-describedby="visualHelp"></textarea></label>
+          </div>
+        </fieldset>
 
       </section>
 
@@ -474,6 +453,16 @@
         </div>
 
 
+<fieldset class="ga4-panel"><legend>Éligibilité du test · données GA4</legend>
+<p>Utilise la même période que le test et le même périmètre pour les données renseignées. Compte les visiteurs uniques, avec la même définition GA4 dans les deux groupes.</p>
+<div class="ga4-grid">
+<label><span class="ga4-label">Visiteurs totaux GA4</span><input type="number" id="ga4TotalSessions" min="0" step="1" placeholder="Ex : 100000" aria-describedby="ga4TotalSessionsHelp"><small id="ga4TotalSessionsHelp" class="field-help">Nombre total de visiteurs uniques du site pendant la période du test. Ex. : 100 000 visiteurs.</small></label>
+<label><span class="ga4-label">Visiteurs éligibles au test</span><input type="number" id="ga4EligibleSessions" min="0" step="1" placeholder="Ex : 25000" aria-describedby="ga4EligibleSessionsHelp"><small id="ga4EligibleSessionsHelp" class="field-help">Ex. : total des visiteurs uniques ayant consulté au moins une page collection pendant la période du test. Compte chaque visiteur une seule fois.</small></label>
+<label><span class="ga4-label">CA total GA4 (€)</span><input type="number" id="ga4TotalRevenue" min="0" step="any" placeholder="Ex : 200000" aria-describedby="ga4TotalRevenueHelp"><small id="ga4TotalRevenueHelp" class="field-help">CA total généré sur le site pendant la période du test. Ex. : 200 000 €.</small></label>
+<label><span class="ga4-label">CA généré par les visiteurs éligibles (€)</span><input type="number" id="ga4EligibleRevenue" min="0" step="any" placeholder="Ex : 60000" aria-describedby="ga4EligibleRevenueHelp"><small id="ga4EligibleRevenueHelp" class="field-help">Ex. : CA total généré pendant la période du test par les visiteurs ayant consulté une page collection, y compris leurs achats sur d’autres pages.</small></label>
+</div>
+<p id="eligibilitySummary" class="eligibility-summary" aria-live="polite">Renseigne les quatre données GA4 pour voir la part des visiteurs ciblés et leur contribution au CA.</p>
+</fieldset>
         <div class="grid two">
 
 
@@ -489,20 +478,8 @@
           </label>
 
 
-          <label>
 
-            Part du CA concernée (%)
 
-            <input
-              type="number"
-              id="affectedShare"
-              value="100"
-              min="0"
-              max="100"
-              step="1"
-            >
-
-          </label>
 
 
           <label>
@@ -524,6 +501,7 @@
             Durée de projection
 
             <select id="projectionMonths">
+<option value="3">3 mois</option>
 
               <option value="12" selected>
                 12 mois
@@ -533,13 +511,9 @@
                 6 mois
               </option>
 
-              <option value="18">
-                18 mois
-              </option>
 
-              <option value="24">
-                24 mois
-              </option>
+
+
 
             </select>
 
@@ -567,7 +541,7 @@
             <input
               type="number"
               id="rbRate"
-              value="24.65"
+              value="15.34"
               step="0.01"
             >
 
@@ -578,7 +552,9 @@
 
 
 
-        <!-- SCÉNARIOS -->
+        <p class="helper-text">Renseigne les données GA4 sur une même période et avec le même périmètre. Elles servent uniquement à calculer les parts éligibles. La projection utilise exclusivement le CA de référence ERP importé.</p>
+<div class="reference-banner" aria-live="polite"><span>Part du trafic éligible : <strong id="trafficSharePreview">—</strong></span><span>Part du CA adressable : <strong id="revenueSharePreview">—</strong></span></div>
+<!-- SCÉNARIOS -->
 
         <div class="scenario-box">
 
@@ -621,7 +597,7 @@
                 <input
                   type="number"
                   id="centralFactor"
-                  value="100"
+                  value="70"
                   step="5"
                 >
 
@@ -643,7 +619,7 @@
                 <input
                   type="number"
                   id="highFactor"
-                  value="120"
+                  value="100"
                   step="5"
                 >
 
@@ -672,6 +648,7 @@
 
 
         <div
+          role="alert"
           id="errorMessage"
           class="error hidden"
         ></div>
@@ -684,7 +661,40 @@
            RÉSULTATS
       ========================== -->
 
-      <section
+      </div>
+<section id="configurationPage"><section class="card workspace-access"><h2>Configuration</h2><p id="workspaceName" class="workspace-identity"></p>
+<div id="connectionInvite"><h2>Connecte-toi pour commencer à enregistrer tes tests</h2><p>Retrouve tes tests, ta marque et ton CA depuis ton Google Sheet sur tous tes appareils.</p></div>
+<div class="cloud-controls">
+<div class="saved-test-actions"><button id="cloudConnect" class="primary-btn" type="button">Se connecter à Google</button><button id="cloudRefresh" class="secondary-btn" type="button" disabled>Actualiser les tests partagés</button><button id="cloudDisconnect" class="secondary-btn" type="button" hidden>Déconnexion</button></div>
+<details class="sync-help"><summary>À propos de la sauvegarde Google Sheets</summary><p>Une feuille par test dans ton classeur : aperçus, résultat, décision, commentaire et calculs sont synchronisés ensemble. Connecte-toi à Google avec un compte éditeur pour enregistrer tes tests.</p>
+<p class="small">Les tests enregistrés suivent les droits de partage de ton classeur. La connexion Google autorise l’accès à Google Sheets ; le calculateur utilise le classeur sélectionné.</p>
+</details><p id="cloudStatus" role="status" aria-live="polite">Non connecté à Google.</p>
+</div>
+
+<button id="configureSheet" type="button" class="secondary-btn">Configurer mon Google Sheet</button>
+<div id="workspaceSetup">
+<h3 id="setupTitle">Pas encore de tests enregistrés ? Voici la configuration</h3>
+<p>Utilise ton propre classeur si tu n’as pas accès à l’espace déjà configuré. Télécharge le modèle Excel, importe-le dans Google Sheets puis renseigne son lien. Les informations doivent être dans la toute première feuille du classeur.</p>
+<a class="template-download secondary-btn" href="modele-config-ab.xlsx" download>Télécharger le modèle Excel / Google Sheets</a>
+<div class="setup-columns"><div><h4>CA journalier dans les deux premières colonnes</h4><p><strong>A1 : date</strong><br><strong>B1 : ca_ht_post_rb</strong></p><p>Une ligne par jour à partir de la ligne 2. Dates au format AAAA-MM-JJ et CA HT après retours/remboursements, en euros. Un historique d’un an est recommandé.</p></div>
+<div><h4>Configuration dans la colonne E</h4><table class="setup-map"><tbody><tr><th>E2</th><td>Nom de la marque</td></tr><tr><th>E3</th><td>Lien HTTPS de l’icône / du logo</td></tr><tr><th>E4</th><td>URL du site web</td></tr><tr><th>E5</th><td>Nom du logiciel A/B test</td></tr><tr><th>E6</th><td>Nom de l’ERP</td></tr></tbody></table></div></div>
+<p>Le classeur doit être accessible à ton compte Google. Tu dois être propriétaire ou éditeur pour enregistrer les tests ; le calculateur crée une feuille par test. La première feuille de CA et de configuration n’est jamais modifiée.</p>
+</div>
+<div class="local-import"><label>Importer un historique CA (CSV)<input id="localRevenueInput" type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values"></label><p class="field-help">Import temporaire sur cet appareil, colonnes date et ca_ht_post_rb. Aucun CA d’un autre espace n’est chargé avant connexion.</p><p id="localImportStatus" class="field-help" role="status"></p></div>
+</section></section>
+<div id="resultsDashboard" class="hidden">
+
+
+<section class="card dashboard-heading">
+<div><h2>Résultats des tests</h2><p>Consulte les gains projetés et les KPI du parcours enregistrés.</p></div>
+
+<details class="projection-help"><summary>Comment ces projections sont calculées</summary><p class="field-help">Uniquement les tests gagnants déployés sur la base du CA fiable : les gains sont recalculés sur cette durée, à partir de la date de mise en production de chaque test, avec la base ERP disponible et ses hypothèses enregistrées. Les autres tests et les KPI hors CA ne sont pas extrapolés en CA.</p>
+<button id="dashboardRefreshERP" type="button" class="secondary-btn">Actualiser la base ERP</button>
+<p>Gain = CA ERP adressable × uplift du test × coefficient du scénario. Les valeurs par défaut sont 70 % en central, 50 % en prudent et 100 % en haut ; les coefficients enregistrés dans chaque test sont conservés.</p><p id="dashboardStatus" class="field-help" role="status"></p></details>
+</section>
+<section id="gainRecap" class="card gain-recap" aria-live="polite"><div><span id="recapTitle">Gains CA totaux projetés sur 12 mois</span><strong id="recapHT">—</strong><small>HT post-RB</small></div><div><span>Équivalent TTC pré-RB</span><strong id="recapTTC">—</strong></div><p id="recapNote"></p></section>
+<section id="kpiResults" class="card hidden" aria-live="polite"></section>
+<section
         id="results"
         class="results hidden"
       >
@@ -714,13 +724,13 @@
             </span>
 
             <a
-              id="resultKameleoonLink"
+              id="resultTestToolLink"
               href="#"
               target="_blank"
               rel="noopener noreferrer"
               class="result-link"
             >
-              Voir les résultats Kameleoon
+              Voir les résultats de l’outil A/B
             </a>
 
           </div>
@@ -736,42 +746,15 @@
           <div>
 
             <p class="eyebrow">
-              IMPACT ESTIMÉ
+              <span id="activeScenarioHeading">SCÉNARIO CENTRAL · IMPACT ESTIMÉ</span>
             </p>
 
 
-            <div class="hero-values">
-
-
-              <div>
-
-                <span>
-                  Gain TTC pré-RB
-                </span>
-
-                <h2 id="annualGainTTC">
-                  +0 €
-                </h2>
-
-              </div>
-
-
-              <div class="hero-secondary">
-
-                <span>
-                  Gain HT post-RB
-                </span>
-
-                <h3 id="annualGainHT">
-                  +0 €
-                </h3>
-
-              </div>
-
-
-            </div>
-
-
+<div class="hero-values">
+<div><span>Gain de CA HT post-RB</span><h2 id="annualGainHT">+0 €</h2></div>
+<div><span>Gain TTC pré-RB</span><h2 id="annualGainTTC">+0 €</h2></div>
+</div>
+<p id="centralScenarioLabel" class="central-scenario-label">70 % de l’uplift observé retenu</p>
             <p id="periodLabel">
               sur les 12 prochains mois
             </p>
@@ -781,13 +764,14 @@
 
           <div class="uplift-badge">
 
-            <span>
+            <span id="upliftMetricLabel">
               Uplift mesuré
             </span>
 
             <strong id="upliftValue">
               +0 %
             </strong>
+            <small id="upliftMetricChange" hidden></small>
 
           </div>
 
@@ -795,6 +779,7 @@
 
 
 
+<details class="result-details"><summary>Voir les hypothèses, le CA de référence et les autres scénarios</summary>
         <!-- RÉFÉRENTIEL -->
 
         <div class="reference-banner">
@@ -818,7 +803,7 @@
           <span>
             RB moyen :
             <strong id="displayRB">
-              24,65 %
+              15,34 %
             </strong>
           </span>
 
@@ -826,7 +811,12 @@
 
 
 
-        <!-- KPI PRINCIPAUX -->
+        <div class="scenario-results eligibility-results">
+<article class="kpi"><div class="metric-heading">Part du trafic éligible<details class="metric-help"><summary aria-label="Comprendre : Part du trafic éligible">?</summary><p>Proportion des visiteurs uniques pouvant être concernés par le test. Exemple : 25 000 visiteurs ayant consulté une page collection sur 100 000 visiteurs au total = 25 %. Cette part est informative et ne multiplie pas le gain.</p></details></div><strong id="eligibleTrafficResult">—</strong><small>Visiteurs éligibles / visiteurs totaux GA4</small></article>
+<article class="kpi"><div class="metric-heading">Part du CA adressable<details class="metric-help"><summary aria-label="Comprendre : Part du CA adressable">?</summary><p>Part du CA GA4 générée par les visiteurs éligibles. Exemple : 60 000 € sur 200 000 € = 30 %. Appliquée à 1 000 000 € de CA ERP projeté, elle donne 300 000 € de CA adressable ERP. Seule cette part est utilisée pour projeter le gain.</p></details></div><strong id="addressableShareResult">—</strong><small>CA éligible / CA total GA4</small></article>
+<article class="kpi"><span>CA adressable ERP · HT post-RB</span><strong id="addressableErpResult">—</strong><small>CA ERP projeté × part du CA adressable, sur la période</small></article>
+</div>
+<!-- KPI PRINCIPAUX -->
 
         <div class="kpi-grid">
 
@@ -834,7 +824,7 @@
           <article class="kpi">
 
             <span>
-              CA de référence TTC pré-RB
+              CA de référence ERP TTC pré-RB
             </span>
 
             <strong id="baselineRevenueTTC">
@@ -851,7 +841,7 @@
           <article class="kpi">
 
             <span>
-              CA de référence HT post-RB
+              CA de référence ERP HT post-RB
             </span>
 
             <strong id="baselineRevenueHT">
@@ -876,7 +866,7 @@
             </strong>
 
             <small>
-              scénario central
+              scénario sélectionné
             </small>
 
           </article>
@@ -893,7 +883,7 @@
             </strong>
 
             <small>
-              scénario central
+              scénario sélectionné
             </small>
 
           </article>
@@ -919,7 +909,7 @@
             </strong>
 
             <small>
-              CA annuel incrémental TTC pré-RB
+              CA incrémental sur la période · TTC pré-RB
             </small>
 
           </article>
@@ -936,7 +926,7 @@
             </strong>
 
             <small>
-              CA annuel incrémental TTC pré-RB
+              CA incrémental sur la période · TTC pré-RB
             </small>
 
           </article>
@@ -946,6 +936,7 @@
 
 
 
+</details>
         <!-- CHART -->
 
         <section class="card result-card">
@@ -956,14 +947,14 @@
 
           <p>
   Compare le CA total projeté sans impact du test et avec
-  100 % de l’uplift observé, sur la part du CA concernée.
+  le scénario sélectionné, sur la part du CA concernée.
   Montants HT post-RB.
           </p>
 
 
           <div class="chart-legend" aria-label="Légende du graphique">
             <span><i class="legend-swatch baseline"></i>Sans impact de l’A/B test</span>
-            <span><i class="legend-swatch tested"></i>Avec 100 % de l’uplift observé</span>
+            <span><i class="legend-swatch tested"></i><span class="selected-scenario-copy">Avec le scénario sélectionné</span></span>
           </div>
           <div class="chart-wrap">
 
@@ -983,7 +974,7 @@
       <h2>Détail de la projection</h2>
       <p>
         Montants HT post-RB. Gain et CA total calculés
-        selon le scénario central. 
+        selon le scénario sélectionné.
       </p>
     </div>
 
@@ -1024,7 +1015,7 @@
 
         <!-- MÉTHODOLOGIE -->
 
-        <section class="methodology">
+        <details class="methodology"><summary>Comment ces projections sont calculées</summary>
 
           <h3>
             Méthode d'estimation
@@ -1032,7 +1023,7 @@
 
           <p id="methodologyText"></p>
 
-        </section>
+        </details>
 
 
       </section>
@@ -1048,9 +1039,7 @@
 
         <div class="section-title">
 
-          <span class="step">
-            4
-          </span>
+
 
           <div>
 
@@ -1059,8 +1048,7 @@
             </h2>
 
             <p>
-              Retrouve les projections déjà réalisées
-              et les liens vers les résultats Kameleoon.
+              Retrouve les projections de CA et les tests KPI du parcours, identifiés par leur badge.
             </p>
 
           </div>
@@ -1079,6 +1067,7 @@
       </section>
 
 
+    </div>
     </main>
 
   </div>
@@ -1097,9 +1086,33 @@
        SCRIPT PRINCIPAL
   ========================== -->
 
-  <script src="script.js"></script>
+  <script src="shared-tests.js?v=24"></script>
+<script src="script.js?v=24"></script>
+<script src="variants.js?v=24"></script>
+<script src="kpi.js?v=24"></script>
+<dialog id="navigationDialog" class="navigation-drawer" aria-labelledby="navigationTitle"><div class="filters-heading"><h2 id="navigationTitle">Navigation</h2><button id="closeNavigation" type="button" class="secondary-btn" aria-label="Fermer le menu">Fermer ×</button></div><div id="mobileNavigationSlot"></div></dialog>
+<dialog id="sheetConfigDialog" aria-labelledby="sheetConfigTitle"><div class="filters-heading"><h2 id="sheetConfigTitle">Choisir mon Google Sheet</h2><button id="closeSheetConfig" type="button" class="secondary-btn">Fermer ×</button></div><label>Lien du classeur Google Sheets<input id="customSheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/…/edit"></label><p>Utilise un classeur que tu peux modifier. Le modèle et les instructions sont disponibles quand aucun test n’est enregistré.</p><p id="sheetConfigStatus" role="status"></p><button id="useCustomSheet" type="button" class="primary-btn">Utiliser ce classeur</button></dialog>
+<dialog id="filtersDialog" aria-labelledby="filtersTitle"><div class="filters-heading"><h2 id="filtersTitle">Filtrer les résultats</h2><button id="closeFilters" type="button" class="secondary-btn">Fermer ×</button></div>
+<div id="mobileFilterSlot"></div><div class="extra-filters">
+<label>Décision<select id="decisionFilter"><option value="all">Tous</option><option value="deployed">Déployé</option><option value="not_deployed">Non déployé</option></select></label>
+<label>Page ciblée<select id="pageFilter"><option value="all">Toutes les pages</option><option value="pdp">PDP</option><option value="plp">PLP</option><option value="hp">HP</option><option value="side_cart">Side cart</option><option value="header">Header</option><option value="other">Autre</option></select></label>
+<label>Device<select id="deviceFilter"><option value="all">Tous</option><option value="mobile">Mobile</option><option value="desktop">Desktop</option></select></label>
+</div><p class="field-help">Mobile et Desktop incluent les tests ciblant tous les devices. Les tests sans ciblage renseigné restent visibles avec « Toutes les pages » et « Tous ».</p><div class="filter-actions"><button id="resetFilters" type="button" class="secondary-btn">Réinitialiser</button><button id="applyFilters" type="button" class="primary-btn">Afficher les résultats</button></div></dialog>
+<dialog id="visualDialog" aria-labelledby="visualDialogTitle">
+<div class="visual-dialog-header"><h2 id="visualDialogTitle">Aperçu</h2><button id="closeVisual" type="button" class="secondary-btn">Fermer ×</button></div>
+<div class="gallery-nav"><button type="button" id="previousVisual" class="secondary-btn">← Précédent</button><span id="visualPosition" aria-live="polite"></span><button type="button" id="nextVisual" class="secondary-btn">Suivant →</button></div><div id="visualDialogContent"></div><a id="visualSourceLink" target="_blank" rel="noopener noreferrer">Ouvrir le fichier original</a>
+</dialog>
+<script src="visuals.js?v=24"></script>
+<script src="pdf-visuals.js?v=24"></script>
+<script src="dashboard.js?v=24"></script>
+<script src="outcomes.js?v=24"></script>
+<script src="saas.js?v=24"></script>
+<script src="comments.js?v=24"></script>
+<script src="filters.js?v=24"></script>
+<script src="workspace.js?v=24"></script>
+<script src="navigation.js?v=24"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 
 </body>
 
 </html>
-
